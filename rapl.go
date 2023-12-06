@@ -22,6 +22,10 @@ func (w *watchFile) Name() string {
 	return w.deviceName
 }
 
+func (w *watchFile) Unit() Unit {
+	return Joules
+}
+
 func (w *watchFile) Read() (float64, error) {
 	var buf [256]byte
 	w.file.Seek(0, io.SeekStart)
@@ -38,7 +42,7 @@ func (w *watchFile) Read() (float64, error) {
 	}
 	increment := asInt - w.lastValue
 	w.lastValue = asInt
-	return float64(increment), nil
+	return float64(increment) * microToUnprefixed, nil
 }
 
 func FindRAPL() ([]*watchFile, error) {

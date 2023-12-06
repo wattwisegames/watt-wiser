@@ -27,11 +27,37 @@ func (s Subfeature) Name() string {
 	return s.Parent.Parent.Name + "#" + s.SubName
 }
 
+func (s Subfeature) Unit() Unit {
+	switch s.Parent.Type {
+	case C.SENSORS_FEATURE_IN:
+		return Volts
+	case C.SENSORS_FEATURE_POWER:
+		return Watts
+	case C.SENSORS_FEATURE_ENERGY:
+		return Joules
+	case C.SENSORS_FEATURE_CURR:
+		return Amps
+	default:
+		return Unknown
+	}
+}
+
 func (s Subfeature) Read() (float64, error) {
 	var value C.double
 	rc := C.sensors_get_value(s.Parent.Parent.CChip, C.int(s.Number), &value)
 	if rc < 0 {
 		return 0, fmt.Errorf("failed reading subfeature value: %d", rc)
+	}
+	ret := float64(value)
+	switch s.Parent.Type {
+	case C.SENSORS_FEATURE_IN:
+		ret *= microToUnprefixed
+	case C.SENSORS_FEATURE_POWER:
+		ret *= microToUnprefixed
+	case C.SENSORS_FEATURE_ENERGY:
+		ret *= microToUnprefixed
+	case C.SENSORS_FEATURE_CURR:
+		ret *= microToUnprefixed
 	}
 	return float64(value), nil
 }

@@ -6,8 +6,40 @@ import (
 	"time"
 )
 
+type Unit uint8
+
+func (u Unit) String() string {
+	switch u {
+	case Joules:
+		return "J"
+	case Watts:
+		return "W"
+	case Amps:
+		return "A"
+	case Volts:
+		return "V"
+	default:
+		return "?"
+	}
+}
+
+const (
+	Joules Unit = iota
+	Watts
+	Amps
+	Volts
+	Unknown
+)
+
+const (
+	// microToUnprefixed is the conversion factor from a micro SI unit to an unprefixed
+	// one.
+	microToUnprefixed = 1.0 / 1_000_000
+)
+
 type Sensor interface {
 	Name() string
+	Unit() Unit
 	Read() (float64, error)
 }
 
@@ -29,7 +61,7 @@ func main() {
 	}
 	fmt.Printf("timestamp_ns, ")
 	for _, s := range sensors {
-		fmt.Printf("%s, ", s.Name())
+		fmt.Printf("%s (%s), ", s.Name(), s.Unit())
 	}
 	fmt.Println()
 	ticker := time.NewTicker(time.Millisecond * 100)
