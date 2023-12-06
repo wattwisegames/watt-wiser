@@ -62,11 +62,12 @@ func FindRAPL() ([]*watchFile, error) {
 			if err != nil {
 				log.Printf("failed resolving name for %q: %v", path, err)
 			}
-			watchFiles = append(watchFiles, &watchFile{
+			w := &watchFile{
 				path:       path,
 				deviceName: strings.TrimSpace(string(name)),
 				file:       file,
-			})
+			}
+			watchFiles = append(watchFiles, w)
 			return nil
 		},
 	); err != nil {

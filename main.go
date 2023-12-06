@@ -62,9 +62,22 @@ func main() {
 	fmt.Printf("timestamp_ns, ")
 	for _, s := range sensors {
 		fmt.Printf("%s (%s), ", s.Name(), s.Unit())
+		if s.Unit() == Watts {
+			fmt.Printf("integrated %s (%s),", s.Name(), Joules)
+		}
 	}
 	fmt.Println()
-	ticker := time.NewTicker(time.Millisecond * 100)
+	// Pre-read every sensor once to ensure that incremental sensors emit coherent first values.
+	for _, chip := range sensors {
+		_, err := chip.Read()
+		if err != nil {
+			log.Fatalf("failed reading value: %v", err)
+			return
+		}
+	}
+	sampleRate := time.Millisecond * 100
+	sampleRateSeconds := float64(sampleRate) / float64(time.Second)
+	ticker := time.NewTicker(sampleRate)
 	defer ticker.Stop()
 	for {
 		select {
@@ -77,6 +90,9 @@ func main() {
 					return
 				}
 				fmt.Printf("%f, ", v)
+				if chip.Unit() == Watts {
+					fmt.Printf("%f, ", v*sampleRateSeconds)
+				}
 			}
 			fmt.Println()
 		}
