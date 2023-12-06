@@ -14,6 +14,31 @@ import (
 */
 import "C"
 
+type SyntheticPower struct {
+	Current Sensor
+	Voltage Sensor
+}
+
+func (s SyntheticPower) Name() string {
+	return fmt.Sprintf("synthesized power (%s x %s)", s.Current.Name(), s.Voltage.Name())
+}
+
+func (s SyntheticPower) Unit() Unit {
+	return Watts
+}
+
+func (s SyntheticPower) Read() (float64, error) {
+	current, err := s.Current.Read()
+	if err != nil {
+		return 0, fmt.Errorf("failed reading current: %w", err)
+	}
+	voltage, err := s.Voltage.Read()
+	if err != nil {
+		return 0, fmt.Errorf("failed reading voltage: %w", err)
+	}
+	return current * voltage, nil
+}
+
 type Subfeature struct {
 	SubName string
 	Number  int
@@ -75,13 +100,13 @@ type Chip struct {
 	CChip *C.sensors_chip_name
 }
 
-func FindSubfeatures() ([]Subfeature, error) {
+func FindSubfeatures() ([]Sensor, error) {
 	rc := C.sensors_init(nil)
 	if rc != 0 {
 		log.Fatalf("failed initializing sensors: %d", rc)
 	}
 
-	relevantSubfeatures := []Subfeature{}
+	relevantSubfeatures := []Sensor{}
 
 	var chipIterState C.int
 	for {
@@ -100,6 +125,10 @@ func FindSubfeatures() ([]Subfeature, error) {
 			continue
 		}
 
+		hasCurrent := false
+		var currentSensor Subfeature
+		hasVoltage := false
+		var voltageSensor Subfeature
 		var featureIterState C.int
 		for {
 			feature := C.sensors_get_features(chip, &featureIterState)
@@ -125,23 +154,64 @@ func FindSubfeatures() ([]Subfeature, error) {
 				currentFeature.Label = C.GoString(cLabel)
 				C.free(unsafe.Pointer(cLabel))
 			}
-			//			fmt.Printf("\t%#+v\n", currentFeature)
 			var subfeatureIterState C.int
-			for {
-				subfeature := C.sensors_get_all_subfeatures(chip, feature, &subfeatureIterState)
-				if subfeature == nil {
-					break
+			switch feature._type {
+			case C.SENSORS_FEATURE_POWER, C.SENSORS_FEATURE_ENERGY:
+				for {
+					subfeature := C.sensors_get_all_subfeatures(chip, feature, &subfeatureIterState)
+					if subfeature == nil {
+						break
+					}
+					switch subfeature._type {
+					case C.SENSORS_SUBFEATURE_POWER_INPUT:
+					case C.SENSORS_SUBFEATURE_POWER_AVERAGE:
+					case C.SENSORS_SUBFEATURE_POWER_AVERAGE_INTERVAL:
+					case C.SENSORS_SUBFEATURE_ENERGY_INPUT:
+					default:
+						continue
+					}
+					currentSubfeature := Subfeature{
+						Parent:  currentFeature,
+						SubName: C.GoString(subfeature.name),
+						Number:  int(subfeature.number),
+						Type:    SubfeatureType(subfeature._type),
+						Mapping: int(subfeature.mapping),
+						Flags:   Flags(subfeature.flags),
+					}
+					relevantSubfeatures = append(relevantSubfeatures, currentSubfeature)
 				}
-				currentSubfeature := Subfeature{
-					Parent:  currentFeature,
-					SubName: C.GoString(subfeature.name),
-					Number:  int(subfeature.number),
-					Type:    SubfeatureType(subfeature._type),
-					Mapping: int(subfeature.mapping),
-					Flags:   Flags(subfeature.flags),
+			case C.SENSORS_FEATURE_IN, C.SENSORS_FEATURE_CURR:
+				for {
+					subfeature := C.sensors_get_all_subfeatures(chip, feature, &subfeatureIterState)
+					if subfeature == nil {
+						break
+					}
+					currentSubfeature := Subfeature{
+						Parent:  currentFeature,
+						SubName: C.GoString(subfeature.name),
+						Number:  int(subfeature.number),
+						Type:    SubfeatureType(subfeature._type),
+						Mapping: int(subfeature.mapping),
+						Flags:   Flags(subfeature.flags),
+					}
+					switch subfeature._type {
+					case C.SENSORS_SUBFEATURE_CURR_INPUT:
+						hasCurrent = true
+						currentSensor = currentSubfeature
+					case C.SENSORS_SUBFEATURE_IN_INPUT:
+						hasVoltage = true
+						voltageSensor = currentSubfeature
+					default:
+						continue
+					}
 				}
-				relevantSubfeatures = append(relevantSubfeatures, currentSubfeature)
 			}
+		}
+		if hasCurrent && hasVoltage {
+			relevantSubfeatures = append(relevantSubfeatures, SyntheticPower{
+				Current: currentSensor,
+				Voltage: voltageSensor,
+			})
 		}
 	}
 	return relevantSubfeatures, nil
