@@ -11,8 +11,7 @@ Unstable and experimental.
 Sadly, reading energy info requires elevated permissions. To get full data:
 
 ```
-go build
-sudo ./energy | tee data.csv
+go build && sudo ./energy -sensors | ./energy
 ```
 
 ## License
