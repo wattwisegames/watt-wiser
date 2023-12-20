@@ -170,7 +170,6 @@ func (c *ChartData) Insert(sample Sample) {
 	if len(c.Samples) == 0 {
 		c.DomainMin = sample.TimestampNS
 		c.DomainMax = sample.TimestampNS
-		c.RangeMin = sample.Data[0]
 		c.RangeMax = sample.Data[0]
 	}
 	for _, datum := range sample.Data {
@@ -207,8 +206,8 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 
 	minRangeLabel := material.Body1(th, strconv.FormatFloat(c.RangeMin, 'f', 3, 64))
 	maxRangeLabel := material.Body1(th, strconv.FormatFloat(c.RangeMax, 'f', 3, 64))
-	minDomainLabel := material.Body1(th, strconv.FormatInt(c.DomainMin, 10))
-	maxDomainLabel := material.Body1(th, strconv.FormatInt(c.DomainMax, 10))
+	minDomainLabel := material.Body1(th, "+0")
+	maxDomainLabel := material.Body1(th, "+"+strconv.FormatInt(c.DomainMax-c.DomainMin, 10))
 	origConstraints := gtx.Constraints
 	gtx.Constraints.Min = image.Point{}
 	macro := op.Record(gtx.Ops)
