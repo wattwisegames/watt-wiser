@@ -1,11 +1,6 @@
-package main
+//go:build linux
 
-import (
-	"fmt"
-	"log"
-	"strings"
-	"unsafe"
-)
+package hwmon
 
 /*
 #cgo LDFLAGS: -lsensors
@@ -13,18 +8,26 @@ import (
 #include <sensors/sensors.h>
 */
 import "C"
+import (
+	"fmt"
+	"log"
+	"strings"
+	"unsafe"
+
+	"git.sr.ht/~whereswaldon/energy/sensors"
+)
 
 type SyntheticPower struct {
-	Current Sensor
-	Voltage Sensor
+	Current sensors.Sensor
+	Voltage sensors.Sensor
 }
 
 func (s SyntheticPower) Name() string {
 	return fmt.Sprintf("synthesized power (%s x %s)", s.Current.Name(), s.Voltage.Name())
 }
 
-func (s SyntheticPower) Unit() Unit {
-	return Watts
+func (s SyntheticPower) Unit() sensors.Unit {
+	return sensors.Watts
 }
 
 func (s SyntheticPower) Read() (float64, error) {
@@ -52,18 +55,18 @@ func (s Subfeature) Name() string {
 	return s.Parent.Parent.Name + "#" + s.SubName
 }
 
-func (s Subfeature) Unit() Unit {
+func (s Subfeature) Unit() sensors.Unit {
 	switch s.Parent.Type {
 	case C.SENSORS_FEATURE_IN:
-		return Volts
+		return sensors.Volts
 	case C.SENSORS_FEATURE_POWER:
-		return Watts
+		return sensors.Watts
 	case C.SENSORS_FEATURE_ENERGY:
-		return Joules
+		return sensors.Joules
 	case C.SENSORS_FEATURE_CURR:
-		return Amps
+		return sensors.Amps
 	default:
-		return Unknown
+		return sensors.Unknown
 	}
 }
 
@@ -76,13 +79,13 @@ func (s Subfeature) Read() (float64, error) {
 	ret := float64(value)
 	switch s.Parent.Type {
 	case C.SENSORS_FEATURE_IN:
-		ret *= microToUnprefixed
+		ret *= sensors.MicroToUnprefixed
 	case C.SENSORS_FEATURE_POWER:
-		ret *= microToUnprefixed
+		ret *= sensors.MicroToUnprefixed
 	case C.SENSORS_FEATURE_ENERGY:
-		ret *= microToUnprefixed
+		ret *= sensors.MicroToUnprefixed
 	case C.SENSORS_FEATURE_CURR:
-		ret *= microToUnprefixed
+		ret *= sensors.MicroToUnprefixed
 	}
 	return float64(value), nil
 }
@@ -100,13 +103,13 @@ type Chip struct {
 	CChip *C.sensors_chip_name
 }
 
-func FindSubfeatures() ([]Sensor, error) {
+func FindEnergySensors() ([]sensors.Sensor, error) {
 	rc := C.sensors_init(nil)
 	if rc != 0 {
 		log.Fatalf("failed initializing sensors: %d", rc)
 	}
 
-	relevantSubfeatures := []Sensor{}
+	relevantSubfeatures := []sensors.Sensor{}
 
 	var chipIterState C.int
 	for {
@@ -463,3 +466,89 @@ func (f Flags) String() string {
 	}
 	return b.String()
 }
+
+/*
+// pollHwmon tries to take advantage of a userspace notification feature of hwmon, but
+// so far I've been unable to get it to work any better than naive polling.
+func pollHwmon() {
+	const targetPath = "/sys/class/hwmon/hwmon7/temp1_input"
+	f, err := os.Open(targetPath)
+	if err != nil {
+		log.Printf("failed opening: %v", err)
+		return
+	}
+	defer f.Close()
+
+	for {
+		n, err := unix.Poll([]unix.PollFd{
+			{
+				Fd:      int32(f.Fd()),
+				Events:  unix.POLLPRI | unix.POLLERR,
+				Revents: 0,
+			},
+		}, 100)
+		if err != nil {
+			var errno syscall.Errno
+			if errors.As(err, &errno) {
+				if errno == syscall.EINTR {
+					continue
+				}
+			}
+			log.Printf("error polling: %T %#+v", err, err)
+			return
+		}
+		err = f.Close()
+		if err != nil {
+			log.Printf("error closing: %v", err)
+			return
+		}
+		f, err = os.Open(targetPath)
+		if err != nil {
+			log.Printf("error reopening: %v", err)
+			return
+		}
+		var buf [256]byte
+		n, err = f.Read(buf[:])
+		if err != nil {
+			log.Printf("error reading: %v", err)
+			return
+		}
+		fmt.Printf("%s", buf[:n])
+	}
+}
+
+// pollHwmon2 is a naive polling implementation.
+func pollHwmon2() {
+	const targetPath = "/sys/class/hwmon/hwmon2/in0_input"
+	f, err := os.Open(targetPath)
+	if err != nil {
+		log.Printf("failed opening: %v", err)
+		return
+	}
+	defer f.Close()
+
+	ticker := time.NewTicker(time.Millisecond * 100)
+	defer ticker.Stop()
+	fmt.Print("timestamp_ns, ")
+	var buf [256]byte
+	for t := range ticker.C {
+		fmt.Printf("%d, ", t.UnixNano())
+		f.Seek(0, io.SeekStart)
+		n, err := f.Read(buf[:])
+		if err != nil {
+			log.Printf("failed reading %s: %v", targetPath, err)
+			continue
+		}
+		if n > 0 && buf[n-1] == 10 {
+			n--
+		}
+		asInt, err := strconv.ParseInt(string(buf[:n]), 10, 64)
+		if err != nil {
+			log.Printf("failed parsing %s's value %s: %v", targetPath, string(buf[:n]), err)
+			continue
+		}
+		fmt.Printf("%d, ", asInt)
+		fmt.Println()
+	}
+}
+*/

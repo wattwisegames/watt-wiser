@@ -1,4 +1,4 @@
-package main
+package rapl
 
 import (
 	"fmt"
@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"git.sr.ht/~whereswaldon/energy/sensors"
 )
 
 type watchFile struct {
@@ -22,8 +24,8 @@ func (w *watchFile) Name() string {
 	return w.deviceName
 }
 
-func (w *watchFile) Unit() Unit {
-	return Joules
+func (w *watchFile) Unit() sensors.Unit {
+	return sensors.Joules
 }
 
 func (w *watchFile) Read() (float64, error) {
@@ -42,7 +44,7 @@ func (w *watchFile) Read() (float64, error) {
 	}
 	increment := asInt - w.lastValue
 	w.lastValue = asInt
-	return float64(increment) * microToUnprefixed, nil
+	return float64(increment) * sensors.MicroToUnprefixed, nil
 }
 
 func FindRAPL() ([]*watchFile, error) {

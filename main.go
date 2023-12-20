@@ -4,71 +4,38 @@ import (
 	"fmt"
 	"log"
 	"time"
+
+	"git.sr.ht/~whereswaldon/energy/hwmon"
+	"git.sr.ht/~whereswaldon/energy/rapl"
+	"git.sr.ht/~whereswaldon/energy/sensors"
 )
-
-type Unit uint8
-
-func (u Unit) String() string {
-	switch u {
-	case Joules:
-		return "J"
-	case Watts:
-		return "W"
-	case Amps:
-		return "A"
-	case Volts:
-		return "V"
-	default:
-		return "?"
-	}
-}
-
-const (
-	Joules Unit = iota
-	Watts
-	Amps
-	Volts
-	Unknown
-)
-
-const (
-	// microToUnprefixed is the conversion factor from a micro SI unit to an unprefixed
-	// one.
-	microToUnprefixed = 1.0 / 1_000_000
-)
-
-type Sensor interface {
-	Name() string
-	Unit() Unit
-	Read() (float64, error)
-}
 
 func main() {
-	raplWatches, err := FindRAPL()
+	raplWatches, err := rapl.FindRAPL()
 	if err != nil {
 		log.Fatal(err)
 	}
-	relevantSubfeatures, err := FindSubfeatures()
+	relevantSubfeatures, err := hwmon.FindEnergySensors()
 	if err != nil {
 		log.Fatal(err)
 	}
-	sensors := make([]Sensor, 0, len(raplWatches)+len(relevantSubfeatures))
+	sensorList := make([]sensors.Sensor, 0, len(raplWatches)+len(relevantSubfeatures))
 	for _, w := range raplWatches {
-		sensors = append(sensors, w)
+		sensorList = append(sensorList, w)
 	}
 	for _, s := range relevantSubfeatures {
-		sensors = append(sensors, s)
+		sensorList = append(sensorList, s)
 	}
 	fmt.Printf("timestamp_ns, ")
-	for _, s := range sensors {
+	for _, s := range sensorList {
 		fmt.Printf("%s (%s), ", s.Name(), s.Unit())
-		if s.Unit() == Watts {
-			fmt.Printf("integrated %s (%s),", s.Name(), Joules)
+		if s.Unit() == sensors.Watts {
+			fmt.Printf("integrated %s (%s),", s.Name(), sensors.Joules)
 		}
 	}
 	fmt.Println()
 	// Pre-read every sensor once to ensure that incremental sensors emit coherent first values.
-	for _, chip := range sensors {
+	for _, chip := range sensorList {
 		_, err := chip.Read()
 		if err != nil {
 			log.Fatalf("failed reading value: %v", err)
@@ -83,14 +50,14 @@ func main() {
 		select {
 		case t := <-ticker.C:
 			fmt.Printf("%d, ", t.UnixNano())
-			for _, chip := range sensors {
+			for _, chip := range sensorList {
 				v, err := chip.Read()
 				if err != nil {
 					log.Fatalf("failed reading value: %v", err)
 					return
 				}
 				fmt.Printf("%f, ", v)
-				if chip.Unit() == Watts {
+				if chip.Unit() == sensors.Watts {
 					fmt.Printf("%f, ", v*sampleRateSeconds)
 				}
 			}
