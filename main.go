@@ -222,6 +222,10 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					return D{Size: gtx.Constraints.Min}
 				}),
+				layout.Rigid(material.Body2(th, "Joules\nper\nsample").Layout),
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return D{Size: gtx.Constraints.Min}
+				}),
 				layout.Rigid(minRangeLabel.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return D{Size: image.Point{
@@ -259,6 +263,7 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceBetween}.Layout(gtx,
 						layout.Rigid(minDomainLabel.Layout),
+						layout.Rigid(material.Body2(th, "Unix Nanosecond Timestamp").Layout),
 						layout.Rigid(maxDomainLabel.Layout),
 					)
 				}),
