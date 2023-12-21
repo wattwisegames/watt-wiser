@@ -239,12 +239,15 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 					for i := 0; i < len(c.Samples[0].Data); i++ {
 						var p clip.Path
 						p.Begin(gtx.Ops)
-						for _, sample := range c.Samples {
+						for sampleIdx, sample := range c.Samples {
 							datum := sample.Data[i]
 							x := (float32(sample.TimestampNS-c.DomainMin) / domainInterval) * float32(gtx.Constraints.Max.X)
 							y := (float32(datum-c.RangeMin) / rangeInterval) * float32(gtx.Constraints.Max.Y)
-							p.LineTo(f32.Pt(x, y))
-							log.Println(x, y)
+							if sampleIdx == 0 {
+								p.MoveTo(f32.Pt(x, y))
+							} else {
+								p.LineTo(f32.Pt(x, y))
+							}
 						}
 
 						stack := clip.Stroke{
