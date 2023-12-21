@@ -182,12 +182,12 @@ func (c *ChartData) Insert(sample Sample) {
 }
 
 var colors = []color.NRGBA{
-	{R: 255, A: 100},
-	{G: 255, A: 100},
-	{B: 255, A: 100},
-	{R: 255, G: 255, A: 100},
-	{R: 255, B: 255, A: 100},
-	{G: 255, B: 255, A: 100},
+	{R: 0xa4, G: 0x63, B: 0x3a, A: 0xff},
+	{R: 0x85, G: 0x76, B: 0x25, A: 0xff}, //#857625
+	{R: 0x51, G: 0x85, B: 0x4d, A: 0xff}, //#51854d
+	{R: 0x2b, G: 0x7f, B: 0xa8, A: 0xff}, //#2b7fa8
+	{R: 0x72, G: 0x6c, B: 0xae, A: 0xff}, //#726cae
+	{R: 0x97, G: 0x5f, B: 0x91, A: 0xff}, //975f91
 }
 
 func (c *ChartData) Layout(gtx C, th *material.Theme) D {
@@ -246,13 +246,10 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 							p.LineTo(f32.Pt(x, y))
 							log.Println(x, y)
 						}
-						p.LineTo(f32.Pt(float32(gtx.Constraints.Max.X), float32(gtx.Constraints.Max.Y)))
-						p.LineTo(f32.Pt(0, float32(gtx.Constraints.Max.Y)))
-						p.LineTo(f32.Pt(0, 0))
-						p.Close()
 
-						stack := clip.Outline{
-							Path: p.End(),
+						stack := clip.Stroke{
+							Path:  p.End(),
+							Width: float32(gtx.Dp(2)),
 						}.Op().Push(gtx.Ops)
 						paint.Fill(gtx.Ops, colors[i%len(colors)])
 						stack.Pop()
