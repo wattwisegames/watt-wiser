@@ -203,12 +203,10 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 	}
 	minRangeLabel := material.Body1(th, strconv.FormatFloat(c.RangeMin, 'f', 3, 64))
 	maxRangeLabel := material.Body1(th, strconv.FormatFloat(c.RangeMax, 'f', 3, 64))
-	minDomainLabel := material.Body1(th, "+0")
-	maxDomainLabel := material.Body1(th, "+"+strconv.FormatInt(c.DomainMax-c.DomainMin, 10))
 	origConstraints := gtx.Constraints
 	gtx.Constraints.Min = image.Point{}
 	macro := op.Record(gtx.Ops)
-	domainDims := minDomainLabel.Layout(gtx)
+	domainDims := minRangeLabel.Layout(gtx)
 	_ = macro.Stop()
 	gtx.Constraints = origConstraints
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
@@ -233,12 +231,24 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 					)
 				}),
 				layout.Flexed(1, func(gtx C) D {
+					origConstraints = gtx.Constraints
+					gtx.Constraints = gtx.Constraints.SubMax(image.Point{0, domainDims.Size.Y})
+					macro := op.Record(gtx.Ops)
+					dims, domainMin, domainMax := c.layoutPlot(gtx)
+					domainIntervalSecs := float32(domainMax-domainMin) / 1_000_000_000
+					call := macro.Stop()
+					gtx.Constraints = origConstraints
+					minDomainLabel := material.Body1(th, "+"+strconv.FormatInt(domainMin, 10))
+					maxDomainLabel := material.Body1(th, "+"+strconv.FormatInt(domainMax, 10))
 					return layout.Flex{Axis: layout.Vertical, Spacing: layout.SpaceBetween}.Layout(gtx,
-						layout.Flexed(1, c.layoutPlot),
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							call.Add(gtx.Ops)
+							return dims
+						}),
 						layout.Rigid(func(gtx C) D {
 							return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceBetween}.Layout(gtx,
 								layout.Rigid(minDomainLabel.Layout),
-								layout.Rigid(material.Body2(th, "Unix Nanosecond Timestamp").Layout),
+								layout.Rigid(material.Body2(th, fmt.Sprintf("Unix Nanosecond Timestamp (%.3fs)", domainIntervalSecs)).Layout),
 								layout.Rigid(maxDomainLabel.Layout),
 							)
 						}),
@@ -275,7 +285,7 @@ func (c *ChartData) layoutKey(gtx C, th *material.Theme) D {
 	})
 }
 
-func (c *ChartData) layoutPlot(gtx C) D {
+func (c *ChartData) layoutPlot(gtx C) (D, int64, int64) {
 	numSamples := gtx.Constraints.Max.X
 	sampleStart := max(0, len(c.Samples)-numSamples)
 	sampleEnd := min(len(c.Samples), numSamples+sampleStart)
@@ -311,7 +321,7 @@ func (c *ChartData) layoutPlot(gtx C) D {
 		paint.Fill(gtx.Ops, colors[i%len(colors)])
 		stack.Pop()
 	}
-	return D{Size: gtx.Constraints.Max}
+	return D{Size: gtx.Constraints.Max}, domainMin, domainMax
 }
 
 func loop(w *app.Window, headings []string, samples chan Sample) error {
