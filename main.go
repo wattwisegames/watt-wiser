@@ -103,7 +103,7 @@ func main() {
 		if flag.NArg() > 0 {
 			f, err := os.Open(flag.Arg(0))
 			if err != nil {
-				log.Printf("failed opening %q, falling back to stdin: %w", flag.Arg(0), err)
+				log.Printf("failed opening %q, falling back to stdin: %v", flag.Arg(0), err)
 			}
 			defer f.Close()
 			source = f
