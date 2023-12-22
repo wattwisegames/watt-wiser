@@ -164,6 +164,7 @@ type ChartData struct {
 	DomainMin int64
 	DomainMax int64
 	Samples   []Sample
+	Headings  []string
 }
 
 func (c *ChartData) Insert(sample Sample) {
@@ -194,16 +195,6 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 	if len(c.Samples) < 1 {
 		return D{Size: gtx.Constraints.Max}
 	}
-	rangeInterval := float32(c.RangeMax - c.RangeMin)
-	if rangeInterval == 0 {
-		rangeInterval = 1
-	}
-	domainInterval := float32(c.DomainMax - c.DomainMin)
-	if domainInterval == 0 {
-		domainInterval = 1
-	}
-	fmt.Println("intervals", domainInterval, rangeInterval)
-
 	minRangeLabel := material.Body1(th, strconv.FormatFloat(c.RangeMin, 'f', 3, 64))
 	maxRangeLabel := material.Body1(th, strconv.FormatFloat(c.RangeMax, 'f', 3, 64))
 	minDomainLabel := material.Body1(th, "+0")
@@ -214,62 +205,82 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 	domainDims := minDomainLabel.Layout(gtx)
 	_ = macro.Stop()
 	gtx.Constraints = origConstraints
-	return layout.Flex{}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical, Spacing: layout.SpaceBetween}.Layout(gtx,
-				layout.Rigid(maxRangeLabel.Layout),
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return D{Size: gtx.Constraints.Min}
-				}),
-				layout.Rigid(material.Body2(th, "Joules\nper\nsample").Layout),
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return D{Size: gtx.Constraints.Min}
-				}),
-				layout.Rigid(minRangeLabel.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return D{Size: image.Point{
-						Y: domainDims.Size.Y,
-					}}
-				}),
-			)
-		}),
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical, Spacing: layout.SpaceBetween}.Layout(gtx,
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					for i := 0; i < len(c.Samples[0].Data); i++ {
-						var p clip.Path
-						p.Begin(gtx.Ops)
-						for sampleIdx, sample := range c.Samples {
-							datum := sample.Data[i]
-							x := (float32(sample.TimestampNS-c.DomainMin) / domainInterval) * float32(gtx.Constraints.Max.X)
-							y := (float32(datum-c.RangeMin) / rangeInterval) * float32(gtx.Constraints.Max.Y)
-							if sampleIdx == 0 {
-								p.MoveTo(f32.Pt(x, y))
-							} else {
-								p.LineTo(f32.Pt(x, y))
-							}
-						}
-
-						stack := clip.Stroke{
-							Path:  p.End(),
-							Width: float32(gtx.Dp(2)),
-						}.Op().Push(gtx.Ops)
-						paint.Fill(gtx.Ops, colors[i%len(colors)])
-						stack.Pop()
-					}
-					return D{Size: gtx.Constraints.Max}
-				}),
+			return layout.Flex{}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceBetween}.Layout(gtx,
-						layout.Rigid(minDomainLabel.Layout),
-						layout.Rigid(material.Body2(th, "Unix Nanosecond Timestamp").Layout),
-						layout.Rigid(maxDomainLabel.Layout),
+					return layout.Flex{Axis: layout.Vertical, Spacing: layout.SpaceBetween}.Layout(gtx,
+						layout.Rigid(maxRangeLabel.Layout),
+						layout.Flexed(1, func(gtx C) D {
+							return D{Size: gtx.Constraints.Min}
+						}),
+						layout.Rigid(material.Body2(th, "Joules\nper\nsample").Layout),
+						layout.Flexed(1, func(gtx C) D {
+							return D{Size: gtx.Constraints.Min}
+						}),
+						layout.Rigid(minRangeLabel.Layout),
+						layout.Rigid(func(gtx C) D {
+							return D{Size: image.Point{
+								Y: domainDims.Size.Y,
+							}}
+						}),
+					)
+				}),
+				layout.Flexed(1, func(gtx C) D {
+					return layout.Flex{Axis: layout.Vertical, Spacing: layout.SpaceBetween}.Layout(gtx,
+						layout.Flexed(1, c.layoutPlot),
+						layout.Rigid(func(gtx C) D {
+							return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceBetween}.Layout(gtx,
+								layout.Rigid(minDomainLabel.Layout),
+								layout.Rigid(material.Body2(th, "Unix Nanosecond Timestamp").Layout),
+								layout.Rigid(maxDomainLabel.Layout),
+							)
+						}),
 					)
 				}),
 			)
 		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return c.layoutKey(gtx, th)
+		}),
 	)
+}
 
+func (c *ChartData) layoutKey(gtx C, th *material.Theme) D {
+	return D{}
+}
+
+func (c *ChartData) layoutPlot(gtx C) D {
+	rangeInterval := float32(c.RangeMax - c.RangeMin)
+	if rangeInterval == 0 {
+		rangeInterval = 1
+	}
+	domainInterval := float32(c.DomainMax - c.DomainMin)
+	if domainInterval == 0 {
+		domainInterval = 1
+	}
+	for i := 0; i < len(c.Samples[0].Data); i++ {
+		var p clip.Path
+		p.Begin(gtx.Ops)
+		for sampleIdx, sample := range c.Samples {
+			datum := sample.Data[i]
+			x := (float32(sample.TimestampNS-c.DomainMin) / domainInterval) * float32(gtx.Constraints.Max.X)
+			y := float32(gtx.Constraints.Max.Y) - (float32(datum-c.RangeMin)/rangeInterval)*float32(gtx.Constraints.Max.Y)
+			if sampleIdx == 0 {
+				p.MoveTo(f32.Pt(x, y))
+			} else {
+				p.LineTo(f32.Pt(x, y))
+			}
+		}
+
+		stack := clip.Stroke{
+			Path:  p.End(),
+			Width: float32(gtx.Dp(2)),
+		}.Op().Push(gtx.Ops)
+		paint.Fill(gtx.Ops, colors[i%len(colors)])
+		stack.Pop()
+	}
+	return D{Size: gtx.Constraints.Max}
 }
 
 func loop(w *app.Window, headings []string, samples chan Sample) error {
