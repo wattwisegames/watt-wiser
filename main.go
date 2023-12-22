@@ -22,6 +22,7 @@ import (
 	"gioui.org/op/paint"
 	"gioui.org/text"
 	"gioui.org/widget/material"
+	"gioui.org/x/outlay"
 	"git.sr.ht/~whereswaldon/energy/hwmon"
 	"git.sr.ht/~whereswaldon/energy/rapl"
 	"git.sr.ht/~whereswaldon/energy/sensors"
@@ -104,18 +105,20 @@ func main() {
 		}
 		samplesChan := make(chan Sample, 1024)
 		relevantIndices := make([]int, 1, len(headings))
+		relevantHeadings := make([]string, 0, len(headings))
 		for i, heading := range headings {
 			if i == 0 {
 				continue
 			}
 			if strings.Contains(heading, "(J)") {
 				relevantIndices = append(relevantIndices, i)
+				relevantHeadings = append(relevantHeadings, heading)
 			}
 		}
 
 		w := app.NewWindow()
 		go func() {
-			if err := loop(w, headings, samplesChan); err != nil {
+			if err := loop(w, relevantHeadings, samplesChan); err != nil {
 				log.Fatal(err)
 			}
 			os.Exit(0)
@@ -247,7 +250,22 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 }
 
 func (c *ChartData) layoutKey(gtx C, th *material.Theme) D {
-	return D{}
+	return outlay.FlowWrap{}.Layout(gtx, len(c.Headings), func(gtx layout.Context, i int) layout.Dimensions {
+		return layout.UniformInset(8).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Alignment: layout.Baseline}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					sideLen := gtx.Dp(10)
+					sz := image.Pt(sideLen, sideLen)
+					paint.FillShape(gtx.Ops, colors[i], clip.Rect{Max: sz}.Op())
+					return D{Size: sz}
+				}),
+				layout.Rigid(layout.Spacer{Width: 8}.Layout),
+				layout.Rigid(func(gtx C) D {
+					return material.Body2(th, c.Headings[i]).Layout(gtx)
+				}),
+			)
+		})
+	})
 }
 
 func (c *ChartData) layoutPlot(gtx C) D {
@@ -285,6 +303,7 @@ func (c *ChartData) layoutPlot(gtx C) D {
 
 func loop(w *app.Window, headings []string, samples chan Sample) error {
 	var data ChartData
+	data.Headings = headings
 	var ops op.Ops
 	th := material.NewTheme()
 	th.Shaper = text.NewShaper(text.WithCollection(gofont.Collection()), text.NoSystemFonts())
