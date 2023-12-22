@@ -173,14 +173,16 @@ type (
 )
 
 type ChartData struct {
-	RangeMin  float64
-	RangeMax  float64
-	DomainMin int64
-	DomainMax int64
-	Samples   []Sample
-	Sums      []float64
-	Headings  []string
-	Enabled   []*widget.Bool
+	RangeMin      float64
+	RangeMax      float64
+	StackRangeMax float64
+	DomainMin     int64
+	DomainMax     int64
+	Samples       []Sample
+	Sums          []float64
+	Headings      []string
+	Enabled       []*widget.Bool
+	Stacked       widget.Bool
 }
 
 func (c *ChartData) Insert(sample Sample) {
@@ -188,6 +190,7 @@ func (c *ChartData) Insert(sample Sample) {
 		c.DomainMin = sample.TimestampNS
 		c.DomainMax = sample.TimestampNS
 		c.RangeMax = sample.Data[0]
+		c.StackRangeMax = 0
 		c.Sums = make([]float64, len(sample.Data))
 		c.Enabled = make([]*widget.Bool, len(sample.Data))
 		for i := range c.Enabled {
@@ -195,11 +198,14 @@ func (c *ChartData) Insert(sample Sample) {
 			c.Enabled[i].Value = true
 		}
 	}
+	datumSum := 0.0
 	for i, datum := range sample.Data {
 		c.RangeMin = min(datum, c.RangeMin)
 		c.RangeMax = max(datum, c.RangeMax)
 		c.Sums[i] += datum
+		datumSum += datum
 	}
+	c.StackRangeMax = max(c.StackRangeMax, datumSum)
 	c.DomainMin = min(sample.TimestampNS, c.DomainMin)
 	c.DomainMax = max(sample.TimestampNS, c.DomainMax)
 	c.Samples = append(c.Samples, sample)
@@ -333,15 +339,28 @@ func (c *ChartData) layoutPlot(gtx C) (D, int64, int64) {
 	sampleStart := max(0, len(c.Samples)-numSamples)
 	sampleEnd := min(len(c.Samples), numSamples+sampleStart)
 	visibleSamples := c.Samples[sampleStart:sampleEnd]
-	rangeInterval := float32(c.RangeMax - c.RangeMin)
-	if rangeInterval == 0 {
-		rangeInterval = 1
-	}
 	domainMin := visibleSamples[0].TimestampNS
 	domainMax := visibleSamples[len(visibleSamples)-1].TimestampNS
+	c.Stacked.Update(gtx)
+	dims := c.Stacked.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		if !c.Stacked.Value {
+			c.layoutLinePlot(gtx, visibleSamples, domainMin, domainMax)
+		} else {
+			c.layoutStackPlot(gtx, visibleSamples, domainMin, domainMax)
+		}
+		return D{Size: gtx.Constraints.Max}
+	})
+	return dims, domainMin, domainMax
+}
+
+func (c *ChartData) layoutLinePlot(gtx C, visibleSamples []Sample, domainMin, domainMax int64) {
 	domainInterval := float32(domainMax - domainMin)
 	if domainInterval == 0 {
 		domainInterval = 1
+	}
+	rangeInterval := float32(c.RangeMax - c.RangeMin)
+	if rangeInterval == 0 {
+		rangeInterval = 1
 	}
 	for i := 0; i < len(c.Samples[0].Data); i++ {
 		if c.Enabled[i].Value {
@@ -366,7 +385,51 @@ func (c *ChartData) layoutPlot(gtx C) (D, int64, int64) {
 			stack.Pop()
 		}
 	}
-	return D{Size: gtx.Constraints.Max}, domainMin, domainMax
+}
+func (c *ChartData) layoutStackPlot(gtx C, visibleSamples []Sample, domainMin, domainMax int64) {
+	domainInterval := float32(domainMax - domainMin)
+	if domainInterval == 0 {
+		domainInterval = 1
+	}
+	rangeInterval := float32(c.StackRangeMax - c.RangeMin)
+	if rangeInterval == 0 {
+		rangeInterval = 1
+	}
+	stackSums := make([]float64, len(visibleSamples))
+	layers := make([]op.CallOp, 0, len(c.Samples[0].Data))
+	for i := 0; i < len(c.Samples[0].Data); i++ {
+		if c.Enabled[i].Value {
+			macro := op.Record(gtx.Ops)
+			var p clip.Path
+			p.Begin(gtx.Ops)
+			// Build the path for the top of the area.
+			for sampleIdx, sample := range visibleSamples {
+				datum := sample.Data[i]
+				x := (float32(sample.TimestampNS-domainMin) / domainInterval) * float32(gtx.Constraints.Max.X)
+				datumY := float32(gtx.Constraints.Max.Y) - (float32(datum+stackSums[sampleIdx]-c.RangeMin)/rangeInterval)*float32(gtx.Constraints.Max.Y)
+				pt := f32.Pt(x, datumY)
+				if sampleIdx == 0 {
+					p.MoveTo(pt)
+				} else {
+					p.LineTo(f32.Pt(x, datumY))
+				}
+				stackSums[sampleIdx] += datum
+			}
+			p.LineTo(layout.FPt(gtx.Constraints.Max))
+			p.LineTo(f32.Pt(0, float32(gtx.Constraints.Max.Y)))
+			p.Close()
+
+			stack := clip.Outline{
+				Path: p.End(),
+			}.Op().Push(gtx.Ops)
+			paint.Fill(gtx.Ops, colors[i%len(colors)])
+			stack.Pop()
+			layers = append(layers, macro.Stop())
+		}
+	}
+	for i := len(layers) - 1; i >= 0; i-- {
+		layers[i].Add(gtx.Ops)
+	}
 }
 
 func loop(w *app.Window, headings []string, samples chan Sample) error {
