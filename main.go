@@ -336,10 +336,14 @@ func loop(w *app.Window, headings []string, samples chan Sample) error {
 			return ev.Err
 		case system.FrameEvent:
 			gtx := layout.NewContext(&ops, ev)
-			select {
-			case newData := <-samples:
-				data.Insert(newData)
-			default:
+		recv:
+			for {
+				select {
+				case newData := <-samples:
+					data.Insert(newData)
+				default:
+					break recv
+				}
 			}
 			data.Layout(gtx, th)
 			ev.Frame(gtx.Ops)
