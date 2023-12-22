@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"io"
 	"log"
 	"os"
 	"strconv"
@@ -98,7 +99,16 @@ func main() {
 		return
 	}
 	go func() {
-		csvReader := csv.NewReader(os.Stdin)
+		var source io.Reader = os.Stdin
+		if flag.NArg() > 0 {
+			f, err := os.Open(flag.Arg(0))
+			if err != nil {
+				log.Printf("failed opening %q, falling back to stdin: %w", flag.Arg(0), err)
+			}
+			defer f.Close()
+			source = f
+		}
+		csvReader := csv.NewReader(source)
 		csvReader.TrimLeadingSpace = true
 		headings, err := csvReader.Read()
 		if err != nil {
