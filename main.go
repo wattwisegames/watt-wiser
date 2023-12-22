@@ -263,8 +263,15 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 }
 
 func (c *ChartData) layoutKey(gtx C, th *material.Theme) D {
-	return outlay.FlowWrap{}.Layout(gtx, len(c.Headings), func(gtx layout.Context, i int) layout.Dimensions {
+	return outlay.FlowWrap{}.Layout(gtx, len(c.Headings)+1, func(gtx layout.Context, i int) layout.Dimensions {
 		return layout.UniformInset(8).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			if i == len(c.Headings) {
+				sum := 0.0
+				for _, subtotal := range c.Sums {
+					sum += subtotal
+				}
+				return material.Body2(th, fmt.Sprintf("Total recorded: %.2f J", sum)).Layout(gtx)
+			}
 			return layout.Flex{Alignment: layout.Baseline}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					sideLen := gtx.Dp(10)
