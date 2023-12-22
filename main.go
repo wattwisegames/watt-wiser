@@ -200,7 +200,13 @@ func (c *ChartData) Insert(sample Sample) {
 	}
 	datumSum := 0.0
 	for i, datum := range sample.Data {
-		c.RangeMin = min(datum, c.RangeMin)
+		// RangeMin should probably always be zero, no matter what the sensors say. None of the
+		// quantities we're measuring can actually be less than zero.
+		//c.RangeMin = min(datum, c.RangeMin)
+		if datum < c.RangeMin {
+			sample.Data[i] = c.RangeMin
+			datum = c.RangeMin
+		}
 		c.RangeMax = max(datum, c.RangeMax)
 		c.Sums[i] += datum
 		datumSum += datum
