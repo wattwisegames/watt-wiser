@@ -21,6 +21,7 @@ import (
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/text"
+	"gioui.org/widget"
 	"gioui.org/widget/material"
 	"gioui.org/x/outlay"
 	"git.sr.ht/~whereswaldon/energy/hwmon"
@@ -169,6 +170,7 @@ type ChartData struct {
 	Samples   []Sample
 	Sums      []float64
 	Headings  []string
+	Enabled   []*widget.Bool
 }
 
 func (c *ChartData) Insert(sample Sample) {
@@ -177,6 +179,11 @@ func (c *ChartData) Insert(sample Sample) {
 		c.DomainMax = sample.TimestampNS
 		c.RangeMax = sample.Data[0]
 		c.Sums = make([]float64, len(sample.Data))
+		c.Enabled = make([]*widget.Bool, len(sample.Data))
+		for i := range c.Enabled {
+			c.Enabled[i] = new(widget.Bool)
+			c.Enabled[i].Value = true
+		}
 	}
 	for i, datum := range sample.Data {
 		c.RangeMin = min(datum, c.RangeMin)
@@ -267,25 +274,44 @@ func (c *ChartData) layoutKey(gtx C, th *material.Theme) D {
 		return layout.UniformInset(8).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			if i == len(c.Headings) {
 				sum := 0.0
-				for _, subtotal := range c.Sums {
-					sum += subtotal
+				for sumIdx, subtotal := range c.Sums {
+					if c.Enabled[sumIdx].Value {
+						sum += subtotal
+					}
 				}
 				return material.Body2(th, fmt.Sprintf("Total recorded: %.2f J", sum)).Layout(gtx)
 			}
+			c.Enabled[i].Update(gtx)
+			enabled := c.Enabled[i].Value
+			disabledAlpha := uint8(100)
 			return layout.Flex{Alignment: layout.Baseline}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					sideLen := gtx.Dp(10)
 					sz := image.Pt(sideLen, sideLen)
-					paint.FillShape(gtx.Ops, colors[i], clip.Rect{Max: sz}.Op())
-					return D{Size: sz}
+					fullColor := colors[i]
+					if !enabled {
+						fullColor.A = disabledAlpha
+					}
+					paint.FillShape(gtx.Ops, fullColor, clip.Rect{Max: sz}.Op())
+					return c.Enabled[i].Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return D{Size: sz}
+					})
 				}),
 				layout.Rigid(layout.Spacer{Width: 8}.Layout),
 				layout.Rigid(func(gtx C) D {
-					return material.Body2(th, c.Headings[i]).Layout(gtx)
+					l := material.Body2(th, c.Headings[i])
+					if !enabled {
+						l.Color.A = disabledAlpha
+					}
+					return l.Layout(gtx)
 				}),
 				layout.Rigid(layout.Spacer{Width: 8}.Layout),
 				layout.Rigid(func(gtx C) D {
-					return material.Body2(th, fmt.Sprintf("%.2f J", c.Sums[i])).Layout(gtx)
+					l := material.Body2(th, fmt.Sprintf("%.2f J", c.Sums[i]))
+					if !enabled {
+						l.Color.A = disabledAlpha
+					}
+					return l.Layout(gtx)
 				}),
 			)
 		})
@@ -308,25 +334,27 @@ func (c *ChartData) layoutPlot(gtx C) (D, int64, int64) {
 		domainInterval = 1
 	}
 	for i := 0; i < len(c.Samples[0].Data); i++ {
-		var p clip.Path
-		p.Begin(gtx.Ops)
-		for sampleIdx, sample := range visibleSamples {
-			datum := sample.Data[i]
-			x := (float32(sample.TimestampNS-domainMin) / domainInterval) * float32(gtx.Constraints.Max.X)
-			y := float32(gtx.Constraints.Max.Y) - (float32(datum-c.RangeMin)/rangeInterval)*float32(gtx.Constraints.Max.Y)
-			if sampleIdx == 0 {
-				p.MoveTo(f32.Pt(x, y))
-			} else {
-				p.LineTo(f32.Pt(x, y))
+		if c.Enabled[i].Value {
+			var p clip.Path
+			p.Begin(gtx.Ops)
+			for sampleIdx, sample := range visibleSamples {
+				datum := sample.Data[i]
+				x := (float32(sample.TimestampNS-domainMin) / domainInterval) * float32(gtx.Constraints.Max.X)
+				y := float32(gtx.Constraints.Max.Y) - (float32(datum-c.RangeMin)/rangeInterval)*float32(gtx.Constraints.Max.Y)
+				if sampleIdx == 0 {
+					p.MoveTo(f32.Pt(x, y))
+				} else {
+					p.LineTo(f32.Pt(x, y))
+				}
 			}
-		}
 
-		stack := clip.Stroke{
-			Path:  p.End(),
-			Width: float32(gtx.Dp(2)),
-		}.Op().Push(gtx.Ops)
-		paint.Fill(gtx.Ops, colors[i%len(colors)])
-		stack.Pop()
+			stack := clip.Stroke{
+				Path:  p.End(),
+				Width: float32(gtx.Dp(2)),
+			}.Op().Push(gtx.Ops)
+			paint.Fill(gtx.Ops, colors[i%len(colors)])
+			stack.Pop()
+		}
 	}
 	return D{Size: gtx.Constraints.Max}, domainMin, domainMax
 }
