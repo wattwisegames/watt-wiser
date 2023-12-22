@@ -167,6 +167,7 @@ type ChartData struct {
 	DomainMin int64
 	DomainMax int64
 	Samples   []Sample
+	Sums      []float64
 	Headings  []string
 }
 
@@ -175,10 +176,12 @@ func (c *ChartData) Insert(sample Sample) {
 		c.DomainMin = sample.TimestampNS
 		c.DomainMax = sample.TimestampNS
 		c.RangeMax = sample.Data[0]
+		c.Sums = make([]float64, len(sample.Data))
 	}
-	for _, datum := range sample.Data {
+	for i, datum := range sample.Data {
 		c.RangeMin = min(datum, c.RangeMin)
 		c.RangeMax = max(datum, c.RangeMax)
+		c.Sums[i] += datum
 	}
 	c.DomainMin = min(sample.TimestampNS, c.DomainMin)
 	c.DomainMax = max(sample.TimestampNS, c.DomainMax)
@@ -263,26 +266,36 @@ func (c *ChartData) layoutKey(gtx C, th *material.Theme) D {
 				layout.Rigid(func(gtx C) D {
 					return material.Body2(th, c.Headings[i]).Layout(gtx)
 				}),
+				layout.Rigid(layout.Spacer{Width: 8}.Layout),
+				layout.Rigid(func(gtx C) D {
+					return material.Body2(th, fmt.Sprintf("%.2f J", c.Sums[i])).Layout(gtx)
+				}),
 			)
 		})
 	})
 }
 
 func (c *ChartData) layoutPlot(gtx C) D {
+	numSamples := gtx.Constraints.Max.X
+	sampleStart := max(0, len(c.Samples)-numSamples)
+	sampleEnd := min(len(c.Samples), numSamples+sampleStart)
+	visibleSamples := c.Samples[sampleStart:sampleEnd]
 	rangeInterval := float32(c.RangeMax - c.RangeMin)
 	if rangeInterval == 0 {
 		rangeInterval = 1
 	}
-	domainInterval := float32(c.DomainMax - c.DomainMin)
+	domainMin := visibleSamples[0].TimestampNS
+	domainMax := visibleSamples[len(visibleSamples)-1].TimestampNS
+	domainInterval := float32(domainMax - domainMin)
 	if domainInterval == 0 {
 		domainInterval = 1
 	}
 	for i := 0; i < len(c.Samples[0].Data); i++ {
 		var p clip.Path
 		p.Begin(gtx.Ops)
-		for sampleIdx, sample := range c.Samples {
+		for sampleIdx, sample := range visibleSamples {
 			datum := sample.Data[i]
-			x := (float32(sample.TimestampNS-c.DomainMin) / domainInterval) * float32(gtx.Constraints.Max.X)
+			x := (float32(sample.TimestampNS-domainMin) / domainInterval) * float32(gtx.Constraints.Max.X)
 			y := float32(gtx.Constraints.Max.Y) - (float32(datum-c.RangeMin)/rangeInterval)*float32(gtx.Constraints.Max.Y)
 			if sampleIdx == 0 {
 				p.MoveTo(f32.Pt(x, y))
