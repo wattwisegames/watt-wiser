@@ -18,6 +18,7 @@ type watchFile struct {
 	deviceName string
 	file       *os.File
 	lastValue  int64
+	maxRange   int64
 }
 
 func (w *watchFile) Name() string {
@@ -43,6 +44,10 @@ func (w *watchFile) Read() (float64, error) {
 		return 0, fmt.Errorf("failed parsing %s (%s): %w", w.path, string(buf[:n]), err)
 	}
 	increment := asInt - w.lastValue
+	if asInt < w.lastValue {
+		// Handle when the counter wraps back past zero.
+		increment += w.maxRange
+	}
 	w.lastValue = asInt
 	return float64(increment) * sensors.MicroToUnprefixed, nil
 }
@@ -64,10 +69,19 @@ func FindRAPL() ([]*watchFile, error) {
 			if err != nil {
 				log.Printf("failed resolving name for %q: %v", path, err)
 			}
+			maxRange, err := os.ReadFile(filepath.Join(filepath.Dir(path), "max_energy_range_uj"))
+			if err != nil {
+				log.Printf("failed resolving max energy range for %q: %v", path, err)
+			}
+			maxRangeInt, err := strconv.ParseInt(strings.TrimSpace(string(maxRange)), 10, 64)
+			if err != nil {
+				log.Printf("failed parsing max energy range for %q %q: %v", path, string(maxRange), err)
+			}
 			w := &watchFile{
 				path:       path,
 				deviceName: strings.TrimSpace(string(name)),
 				file:       file,
+				maxRange:   maxRangeInt,
 			}
 			watchFiles = append(watchFiles, w)
 			return nil
