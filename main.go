@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gioui.org/app"
@@ -160,7 +161,6 @@ func main() {
 				TimestampNS: ns,
 				Data:        samples,
 			}
-			w.Invalidate()
 		}
 	}()
 
@@ -172,14 +172,18 @@ type (
 	D = layout.Dimensions
 )
 
+type Extrema struct {
+	Min, Max float64
+}
+
 type ChartData struct {
 	RangeMin      float64
 	RangeMax      float64
-	StackRangeMax float64
 	DomainMin     int64
 	DomainMax     int64
 	Samples       []Sample
 	Sums          []float64
+	DatasetRanges []Extrema
 	Headings      []string
 	Enabled       []*widget.Bool
 	Stacked       widget.Bool
@@ -190,8 +194,8 @@ func (c *ChartData) Insert(sample Sample) {
 		c.DomainMin = sample.TimestampNS
 		c.DomainMax = sample.TimestampNS
 		c.RangeMax = sample.Data[0]
-		c.StackRangeMax = 0
 		c.Sums = make([]float64, len(sample.Data))
+		c.DatasetRanges = make([]Extrema, len(sample.Data))
 		c.Enabled = make([]*widget.Bool, len(sample.Data))
 		for i := range c.Enabled {
 			c.Enabled[i] = new(widget.Bool)
@@ -209,9 +213,10 @@ func (c *ChartData) Insert(sample Sample) {
 		}
 		c.RangeMax = max(datum, c.RangeMax)
 		c.Sums[i] += datum
+		c.DatasetRanges[i].Min = min(c.DatasetRanges[i].Min, datum)
+		c.DatasetRanges[i].Max = max(c.DatasetRanges[i].Max, datum)
 		datumSum += datum
 	}
-	c.StackRangeMax = max(c.StackRangeMax, datumSum)
 	c.DomainMin = min(sample.TimestampNS, c.DomainMin)
 	c.DomainMax = max(sample.TimestampNS, c.DomainMax)
 	c.Samples = append(c.Samples, sample)
@@ -234,14 +239,33 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 	if len(c.Samples) < 1 {
 		return D{Size: gtx.Constraints.Max}
 	}
-	minRangeLabel := material.Body1(th, strconv.FormatFloat(c.RangeMin, 'f', 3, 64))
-	maxRangeLabel := material.Body1(th, strconv.FormatFloat(c.RangeMax, 'f', 3, 64))
+	minRangeLabel := material.Body1(th, strconv.FormatFloat(0, 'f', 3, 64))
 	origConstraints := gtx.Constraints
 	gtx.Constraints.Min = image.Point{}
+
+	// Determine the amount of space to reserve for axis labels.
 	macro := op.Record(gtx.Ops)
-	domainDims := minRangeLabel.Layout(gtx)
+	axisLabelDims := minRangeLabel.Layout(gtx)
 	_ = macro.Stop()
+
+	// Determine the space occupied by the key.
+	macro = op.Record(gtx.Ops)
+	gtx.Constraints.Min.X = gtx.Constraints.Max.X
+	keyDims := c.layoutKey(gtx, th)
+	keyCall := macro.Stop()
+
+	// Lay out the plot in the remaining space after accounting for axis
+	// labels and the key.
+	gtx.Constraints = origConstraints.SubMax(axisLabelDims.Size.Add(image.Pt(0, keyDims.Size.Y)))
+	macro = op.Record(gtx.Ops)
+	dims, domainMin, domainMax, rangeMin, rangeMax := c.layoutPlot(gtx)
+	domainIntervalSecs := float32(domainMax-domainMin) / 1_000_000_000
+	plotCall := macro.Stop()
 	gtx.Constraints = origConstraints
+	minRangeLabel.Text = strconv.FormatFloat(rangeMin, 'f', 3, 64)
+	maxRangeLabel := material.Body1(th, strconv.FormatFloat(rangeMax, 'f', 3, 64))
+	minDomainLabel := material.Body1(th, strconv.FormatInt(domainMin, 10))
+	maxDomainLabel := material.Body1(th, strconv.FormatInt(domainMax, 10))
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{}.Layout(gtx,
@@ -258,24 +282,15 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 						layout.Rigid(minRangeLabel.Layout),
 						layout.Rigid(func(gtx C) D {
 							return D{Size: image.Point{
-								Y: domainDims.Size.Y,
+								Y: axisLabelDims.Size.Y,
 							}}
 						}),
 					)
 				}),
 				layout.Flexed(1, func(gtx C) D {
-					origConstraints = gtx.Constraints
-					gtx.Constraints = gtx.Constraints.SubMax(image.Point{0, domainDims.Size.Y})
-					macro := op.Record(gtx.Ops)
-					dims, domainMin, domainMax := c.layoutPlot(gtx)
-					domainIntervalSecs := float32(domainMax-domainMin) / 1_000_000_000
-					call := macro.Stop()
-					gtx.Constraints = origConstraints
-					minDomainLabel := material.Body1(th, "+"+strconv.FormatInt(domainMin, 10))
-					maxDomainLabel := material.Body1(th, "+"+strconv.FormatInt(domainMax, 10))
 					return layout.Flex{Axis: layout.Vertical, Spacing: layout.SpaceBetween}.Layout(gtx,
 						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-							call.Add(gtx.Ops)
+							plotCall.Add(gtx.Ops)
 							return dims
 						}),
 						layout.Rigid(func(gtx C) D {
@@ -290,7 +305,8 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 			)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return c.layoutKey(gtx, th)
+			keyCall.Add(gtx.Ops)
+			return keyDims
 		}),
 	)
 }
@@ -344,23 +360,25 @@ func (c *ChartData) layoutKey(gtx C, th *material.Theme) D {
 	})
 }
 
-func (c *ChartData) layoutPlot(gtx C) (D, int64, int64) {
+func (c *ChartData) layoutPlot(gtx C) (dims D, domainMin, domainMax int64, rangeMin, rangeMax float64) {
 	numSamples := gtx.Constraints.Max.X
 	sampleStart := max(0, len(c.Samples)-numSamples)
 	sampleEnd := min(len(c.Samples), numSamples+sampleStart)
 	visibleSamples := c.Samples[sampleStart:sampleEnd]
-	domainMin := visibleSamples[0].TimestampNS
-	domainMax := visibleSamples[len(visibleSamples)-1].TimestampNS
+	domainMin = visibleSamples[0].TimestampNS
+	domainMax = visibleSamples[len(visibleSamples)-1].TimestampNS
+	rangeMin = c.RangeMin
 	c.Stacked.Update(gtx)
-	dims := c.Stacked.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	dims = c.Stacked.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		if !c.Stacked.Value {
+			rangeMax = c.RangeMax
 			c.layoutLinePlot(gtx, visibleSamples, domainMin, domainMax)
 		} else {
-			c.layoutStackPlot(gtx, visibleSamples, domainMin, domainMax)
+			rangeMax = c.layoutStackPlot(gtx, visibleSamples, domainMin, domainMax)
 		}
 		return D{Size: gtx.Constraints.Max}
 	})
-	return dims, domainMin, domainMax
+	return dims, domainMin, domainMax, rangeMin, rangeMax
 }
 
 func (c *ChartData) layoutLinePlot(gtx C, visibleSamples []Sample, domainMin, domainMax int64) {
@@ -396,12 +414,18 @@ func (c *ChartData) layoutLinePlot(gtx C, visibleSamples []Sample, domainMin, do
 		}
 	}
 }
-func (c *ChartData) layoutStackPlot(gtx C, visibleSamples []Sample, domainMin, domainMax int64) {
+func (c *ChartData) layoutStackPlot(gtx C, visibleSamples []Sample, domainMin, domainMax int64) (rangeMax float64) {
 	domainInterval := float32(domainMax - domainMin)
 	if domainInterval == 0 {
 		domainInterval = 1
 	}
-	rangeInterval := float32(c.StackRangeMax - c.RangeMin)
+	stackRangeMax := 0.0
+	for i := range c.Enabled {
+		if c.Enabled[i].Value {
+			stackRangeMax += c.DatasetRanges[i].Max
+		}
+	}
+	rangeInterval := float32(stackRangeMax - c.RangeMin)
 	if rangeInterval == 0 {
 		rangeInterval = 1
 	}
@@ -440,30 +464,37 @@ func (c *ChartData) layoutStackPlot(gtx C, visibleSamples []Sample, domainMin, d
 	for i := len(layers) - 1; i >= 0; i-- {
 		layers[i].Add(gtx.Ops)
 	}
+	return stackRangeMax
 }
 
 func loop(w *app.Window, headings []string, samples chan Sample) error {
+	var dataMutex sync.Mutex
 	var data ChartData
 	data.Headings = headings
 	var ops op.Ops
 	th := material.NewTheme()
 	th.Shaper = text.NewShaper(text.WithCollection(gofont.Collection()), text.NoSystemFonts())
+	go func() {
+		for sample := range samples {
+			func() {
+				dataMutex.Lock()
+				defer dataMutex.Unlock()
+				data.Insert(sample)
+			}()
+			w.Invalidate()
+		}
+	}()
 	for {
 		switch ev := w.NextEvent().(type) {
 		case system.DestroyEvent:
 			return ev.Err
 		case system.FrameEvent:
 			gtx := layout.NewContext(&ops, ev)
-		recv:
-			for {
-				select {
-				case newData := <-samples:
-					data.Insert(newData)
-				default:
-					break recv
-				}
-			}
-			data.Layout(gtx, th)
+			func() {
+				dataMutex.Lock()
+				defer dataMutex.Unlock()
+				data.Layout(gtx, th)
+			}()
 			ev.Frame(gtx.Ops)
 		}
 	}
