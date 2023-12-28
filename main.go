@@ -18,6 +18,7 @@ import (
 	"gioui.org/app"
 	"gioui.org/f32"
 	"gioui.org/font/gofont"
+	"gioui.org/gesture"
 	"gioui.org/io/system"
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -184,6 +185,8 @@ type ChartData struct {
 	Headings  []string
 	Enabled   []*widget.Bool
 	Stacked   widget.Bool
+	scroll    gesture.Scroll
+	nsPerDp   int64
 }
 
 func (c *ChartData) Insert(sample Sample) {
@@ -197,6 +200,7 @@ func (c *ChartData) Insert(sample Sample) {
 			c.Enabled[i] = new(widget.Bool)
 			c.Enabled[i].Value = true
 		}
+		c.nsPerDp = 10_000_000 // ns/Dp
 	}
 	for i, datum := range sample.Data {
 		// RangeMin should probably always be zero, no matter what the sensors say. None of the
@@ -286,7 +290,7 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 						layout.Rigid(func(gtx C) D {
 							return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceBetween}.Layout(gtx,
 								layout.Rigid(minDomainLabel.Layout),
-								layout.Rigid(material.Body2(th, fmt.Sprintf("Unix Nanosecond Timestamp (%.3fs)", domainIntervalSecs)).Layout),
+								layout.Rigid(material.Body2(th, fmt.Sprintf("ns timestamp (%.3fs) scale = %dns/Dp", domainIntervalSecs, c.nsPerDp)).Layout),
 								layout.Rigid(maxDomainLabel.Layout),
 							)
 						}),
@@ -353,7 +357,13 @@ func (c *ChartData) layoutKey(gtx C, th *material.Theme) D {
 func (c *ChartData) layoutPlot(gtx C) (dims D, domainMin, domainMax int64, rangeMin, rangeMax float64) {
 	rangeMin = c.RangeMin
 	c.Stacked.Update(gtx)
+	dist := c.scroll.Update(gtx.Metric, gtx.Queue, gtx.Now, gesture.Vertical)
+	if dist != 0 {
+		proportion := 1 + float64(dist)/float64(gtx.Constraints.Max.Y)
+		c.nsPerDp = int64(math.Round(float64(c.nsPerDp) * proportion))
+	}
 	dims = c.Stacked.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		c.scroll.Add(gtx.Ops, image.Rect(0, -1e6, 0, 1e6))
 		if !c.Stacked.Value {
 			domainMin, domainMax, rangeMin, rangeMax = c.layoutLinePlot(gtx)
 		} else {
@@ -374,15 +384,17 @@ func floor[T constraints.Integer | constraints.Float](a T) T {
 
 func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin, rangeMax float64) {
 	numDp := gtx.Metric.PxToDp(gtx.Constraints.Max.X)
-	scale := 10_000_000 // ns/Dp
-	nanosPerPx := int64(math.Round(float64(scale) / float64(gtx.Metric.PxPerDp)))
-	domainInterval := int64(math.Round(float64(numDp * unit.Dp(scale))))
+	nanosPerPx := int64(math.Round(float64(c.nsPerDp) / float64(gtx.Metric.PxPerDp)))
+	domainInterval := int64(math.Round(float64(numDp * unit.Dp(c.nsPerDp))))
 	rangeInterval := float32(c.RangeMax - c.RangeMin)
 	if rangeInterval == 0 {
 		rangeInterval = 1
 	}
 	oneDp := float32(gtx.Dp(1))
-	domainStart := c.DomainMax - domainInterval
+	// domainEnd forces the first datapoint to be an even multiple of the current
+	// scale, which prevents weird cross-frame sampling artifacts.
+	domainEnd := (c.DomainMax / c.nsPerDp) * c.nsPerDp
+	domainStart := domainEnd - domainInterval
 	totalIntervals := gtx.Constraints.Max.X
 	for i, series := range c.Series {
 		if c.Enabled[i].Value {
@@ -392,7 +404,7 @@ func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin,
 			prevIntervalMean := 0.0
 			prevYT := float32(0)
 			for intervalCount := 1; intervalCount <= totalIntervals; intervalCount++ {
-				tsStart := c.DomainMax - (nanosPerPx * int64(intervalCount))
+				tsStart := domainEnd - (nanosPerPx * int64(intervalCount))
 				tsEnd := tsStart + nanosPerPx
 				_, intervalMean, _, ok := series.Values(tsStart, tsEnd)
 				if !ok {
@@ -442,7 +454,7 @@ func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin,
 			stack.Pop()
 		}
 	}
-	return domainStart, c.DomainMax, 0, c.RangeMax
+	return domainStart, domainEnd, 0, c.RangeMax
 }
 
 /*
