@@ -51,7 +51,7 @@ func sensorsMain() {
 	for _, s := range relevantSubfeatures {
 		sensorList = append(sensorList, s)
 	}
-	fmt.Printf("timestamp_ns, ")
+	fmt.Printf("sample start (ns), sample end (ns), ")
 	for _, s := range sensorList {
 		fmt.Printf("%s (%s), ", s.Name(), s.Unit())
 		if s.Unit() == sensors.Watts {
@@ -59,6 +59,7 @@ func sensorsMain() {
 		}
 	}
 	fmt.Println()
+	lastReadTime := time.Now()
 	// Pre-read every sensor once to ensure that incremental sensors emit coherent first values.
 	for _, chip := range sensorList {
 		_, err := chip.Read()
@@ -74,7 +75,7 @@ func sensorsMain() {
 	for {
 		select {
 		case t := <-ticker.C:
-			fmt.Printf("%d, ", t.UnixNano())
+			fmt.Printf("%d, %d, ", lastReadTime.UnixNano(), t.UnixNano())
 			for _, chip := range sensorList {
 				v, err := chip.Read()
 				if err != nil {
@@ -87,13 +88,14 @@ func sensorsMain() {
 				}
 			}
 			fmt.Println()
+			lastReadTime = t
 		}
 	}
 }
 
 type Sample struct {
-	TimestampNS int64
-	Data        []float64
+	StartTimestampNS, EndTimestampNS int64
+	Data                             []float64
 }
 
 func main() {
@@ -120,7 +122,9 @@ func main() {
 			log.Fatalf("could not read csv headings: %v", err)
 		}
 		samplesChan := make(chan Sample, 1024)
-		relevantIndices := make([]int, 1, len(headings))
+		relevantIndices := make([]int, 2, len(headings))
+		relevantIndices[0] = 0
+		relevantIndices[1] = 1
 		relevantHeadings := make([]string, 0, len(headings))
 		for i, heading := range headings {
 			if i == 0 {
@@ -147,23 +151,29 @@ func main() {
 				log.Printf("could not read sensor data: %v", err)
 				return
 			}
-			samples := make([]float64, len(relevantIndices)-1)
-			ns, err := strconv.ParseInt(rec[0], 10, 64)
+			samples := make([]float64, len(relevantIndices)-2)
+			startNs, err := strconv.ParseInt(rec[0], 10, 64)
 			if err != nil {
 				log.Printf("failed parsing timestamp: %v", err)
 				continue
 			}
-			for i := 1; i < len(relevantIndices); i++ {
+			endNs, err := strconv.ParseInt(rec[1], 10, 64)
+			if err != nil {
+				log.Printf("failed parsing timestamp: %v", err)
+				continue
+			}
+			for i := 2; i < len(relevantIndices); i++ {
 				data, err := strconv.ParseFloat(rec[relevantIndices[i]], 64)
 				if err != nil {
 					log.Printf("failed parsing data[%d]=%q: %v", i, rec[i], err)
 					continue
 				}
-				samples[i-1] = data
+				samples[i-2] = data
 			}
 			samplesChan <- Sample{
-				TimestampNS: ns,
-				Data:        samples,
+				StartTimestampNS: startNs,
+				EndTimestampNS:   endNs,
+				Data:             samples,
 			}
 		}
 	}()
@@ -191,8 +201,8 @@ type ChartData struct {
 
 func (c *ChartData) Insert(sample Sample) {
 	if len(c.Series) == 0 {
-		c.DomainMin = sample.TimestampNS
-		c.DomainMax = sample.TimestampNS
+		c.DomainMin = sample.StartTimestampNS
+		c.DomainMax = sample.StartTimestampNS
 		c.RangeMax = sample.Data[0]
 		c.Series = make([]Series, len(sample.Data))
 		c.Enabled = make([]*widget.Bool, len(sample.Data))
@@ -202,6 +212,8 @@ func (c *ChartData) Insert(sample Sample) {
 		}
 		c.nsPerDp = 10_000_000 // ns/Dp
 	}
+	intervalNs := float64(sample.EndTimestampNS - sample.StartTimestampNS)
+	intervalSecs := intervalNs / 1_000_000_000
 	for i, datum := range sample.Data {
 		// RangeMin should probably always be zero, no matter what the sensors say. None of the
 		// quantities we're measuring can actually be less than zero.
@@ -209,11 +221,12 @@ func (c *ChartData) Insert(sample Sample) {
 		if datum < 0 {
 			datum = 0
 		}
+		datum *= intervalSecs
 		c.RangeMax = max(datum, c.RangeMax)
-		c.Series[i].Insert(sample.TimestampNS, datum)
+		c.Series[i].Insert(sample.EndTimestampNS, datum)
 	}
-	c.DomainMin = min(sample.TimestampNS, c.DomainMin)
-	c.DomainMax = max(sample.TimestampNS, c.DomainMax)
+	c.DomainMin = min(sample.StartTimestampNS, c.DomainMin)
+	c.DomainMax = max(sample.StartTimestampNS, c.DomainMax)
 }
 
 var colors = []color.NRGBA{
@@ -269,7 +282,7 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 						layout.Flexed(1, func(gtx C) D {
 							return D{Size: gtx.Constraints.Min}
 						}),
-						layout.Rigid(material.Body2(th, "Joules\nper\nsample").Layout),
+						layout.Rigid(material.Body2(th, "Watts").Layout),
 						layout.Flexed(1, func(gtx C) D {
 							return D{Size: gtx.Constraints.Min}
 						}),
