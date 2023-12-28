@@ -8,6 +8,7 @@ import (
 	"image/color"
 	"io"
 	"log"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -23,12 +24,14 @@ import (
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/text"
+	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 	"gioui.org/x/outlay"
 	"git.sr.ht/~whereswaldon/energy/hwmon"
 	"git.sr.ht/~whereswaldon/energy/rapl"
 	"git.sr.ht/~whereswaldon/energy/sensors"
+	"golang.org/x/exp/constraints"
 )
 
 func sensorsMain() {
@@ -172,54 +175,41 @@ type (
 	D = layout.Dimensions
 )
 
-type Extrema struct {
-	Min, Max float64
-}
-
 type ChartData struct {
-	RangeMin      float64
-	RangeMax      float64
-	DomainMin     int64
-	DomainMax     int64
-	Samples       []Sample
-	Sums          []float64
-	DatasetRanges []Extrema
-	Headings      []string
-	Enabled       []*widget.Bool
-	Stacked       widget.Bool
+	RangeMin  float64
+	RangeMax  float64
+	DomainMin int64
+	DomainMax int64
+	Series    []Series
+	Headings  []string
+	Enabled   []*widget.Bool
+	Stacked   widget.Bool
 }
 
 func (c *ChartData) Insert(sample Sample) {
-	if len(c.Samples) == 0 {
+	if len(c.Series) == 0 {
 		c.DomainMin = sample.TimestampNS
 		c.DomainMax = sample.TimestampNS
 		c.RangeMax = sample.Data[0]
-		c.Sums = make([]float64, len(sample.Data))
-		c.DatasetRanges = make([]Extrema, len(sample.Data))
+		c.Series = make([]Series, len(sample.Data))
 		c.Enabled = make([]*widget.Bool, len(sample.Data))
 		for i := range c.Enabled {
 			c.Enabled[i] = new(widget.Bool)
 			c.Enabled[i].Value = true
 		}
 	}
-	datumSum := 0.0
 	for i, datum := range sample.Data {
 		// RangeMin should probably always be zero, no matter what the sensors say. None of the
 		// quantities we're measuring can actually be less than zero.
 		//c.RangeMin = min(datum, c.RangeMin)
-		if datum < c.RangeMin {
-			sample.Data[i] = c.RangeMin
-			datum = c.RangeMin
+		if datum < 0 {
+			datum = 0
 		}
 		c.RangeMax = max(datum, c.RangeMax)
-		c.Sums[i] += datum
-		c.DatasetRanges[i].Min = min(c.DatasetRanges[i].Min, datum)
-		c.DatasetRanges[i].Max = max(c.DatasetRanges[i].Max, datum)
-		datumSum += datum
+		c.Series[i].Insert(sample.TimestampNS, datum)
 	}
 	c.DomainMin = min(sample.TimestampNS, c.DomainMin)
 	c.DomainMax = max(sample.TimestampNS, c.DomainMax)
-	c.Samples = append(c.Samples, sample)
 }
 
 var colors = []color.NRGBA{
@@ -236,7 +226,7 @@ var colors = []color.NRGBA{
 }
 
 func (c *ChartData) Layout(gtx C, th *material.Theme) D {
-	if len(c.Samples) < 1 {
+	if len(c.Series) < 1 {
 		return D{Size: gtx.Constraints.Max}
 	}
 	minRangeLabel := material.Body1(th, strconv.FormatFloat(0, 'f', 3, 64))
@@ -316,9 +306,9 @@ func (c *ChartData) layoutKey(gtx C, th *material.Theme) D {
 		return layout.UniformInset(8).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			if i == len(c.Headings) {
 				sum := 0.0
-				for sumIdx, subtotal := range c.Sums {
+				for sumIdx, series := range c.Series {
 					if c.Enabled[sumIdx].Value {
-						sum += subtotal
+						sum += series.Sum
 					}
 				}
 				return material.Body2(th, fmt.Sprintf("Total recorded: %.2f J", sum)).Layout(gtx)
@@ -349,7 +339,7 @@ func (c *ChartData) layoutKey(gtx C, th *material.Theme) D {
 				}),
 				layout.Rigid(layout.Spacer{Width: 8}.Layout),
 				layout.Rigid(func(gtx C) D {
-					l := material.Body2(th, fmt.Sprintf("%.2f J", c.Sums[i]))
+					l := material.Body2(th, fmt.Sprintf("%.2f J", c.Series[i].Sum))
 					if !enabled {
 						l.Color.A = disabledAlpha
 					}
@@ -361,59 +351,101 @@ func (c *ChartData) layoutKey(gtx C, th *material.Theme) D {
 }
 
 func (c *ChartData) layoutPlot(gtx C) (dims D, domainMin, domainMax int64, rangeMin, rangeMax float64) {
-	numSamples := gtx.Constraints.Max.X
-	sampleStart := max(0, len(c.Samples)-numSamples)
-	sampleEnd := min(len(c.Samples), numSamples+sampleStart)
-	visibleSamples := c.Samples[sampleStart:sampleEnd]
-	domainMin = visibleSamples[0].TimestampNS
-	domainMax = visibleSamples[len(visibleSamples)-1].TimestampNS
 	rangeMin = c.RangeMin
 	c.Stacked.Update(gtx)
 	dims = c.Stacked.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		if !c.Stacked.Value {
-			rangeMax = c.RangeMax
-			c.layoutLinePlot(gtx, visibleSamples, domainMin, domainMax)
+			domainMin, domainMax, rangeMin, rangeMax = c.layoutLinePlot(gtx)
 		} else {
-			rangeMax = c.layoutStackPlot(gtx, visibleSamples, domainMin, domainMax)
+			//			rangeMax = c.layoutStackPlot(gtx, visibleSamples, domainMin, domainMax)
 		}
 		return D{Size: gtx.Constraints.Max}
 	})
 	return dims, domainMin, domainMax, rangeMin, rangeMax
 }
 
-func (c *ChartData) layoutLinePlot(gtx C, visibleSamples []Sample, domainMin, domainMax int64) {
-	domainInterval := float32(domainMax - domainMin)
-	if domainInterval == 0 {
-		domainInterval = 1
-	}
+func ceil[T constraints.Integer | constraints.Float](a T) T {
+	return T(math.Ceil(float64(a)))
+}
+
+func floor[T constraints.Integer | constraints.Float](a T) T {
+	return T(math.Floor(float64(a)))
+}
+
+func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin, rangeMax float64) {
+	numDp := gtx.Metric.PxToDp(gtx.Constraints.Max.X)
+	scale := 10_000_000 // ns/Dp
+	nanosPerPx := int64(math.Round(float64(scale) / float64(gtx.Metric.PxPerDp)))
+	domainInterval := int64(math.Round(float64(numDp * unit.Dp(scale))))
 	rangeInterval := float32(c.RangeMax - c.RangeMin)
 	if rangeInterval == 0 {
 		rangeInterval = 1
 	}
-	for i := 0; i < len(c.Samples[0].Data); i++ {
+	oneDp := float32(gtx.Dp(1))
+	domainStart := c.DomainMax - domainInterval
+	totalIntervals := gtx.Constraints.Max.X
+	for i, series := range c.Series {
 		if c.Enabled[i].Value {
 			var p clip.Path
 			p.Begin(gtx.Ops)
-			for sampleIdx, sample := range visibleSamples {
-				datum := sample.Data[i]
-				x := (float32(sample.TimestampNS-domainMin) / domainInterval) * float32(gtx.Constraints.Max.X)
-				y := float32(gtx.Constraints.Max.Y) - (float32(datum-c.RangeMin)/rangeInterval)*float32(gtx.Constraints.Max.Y)
-				if sampleIdx == 0 {
-					p.MoveTo(f32.Pt(x, y))
-				} else {
-					p.LineTo(f32.Pt(x, y))
+			returnPath := []f32.Point{}
+			prevIntervalMean := 0.0
+			prevYT := float32(0)
+			for intervalCount := 1; intervalCount <= totalIntervals; intervalCount++ {
+				tsStart := c.DomainMax - (nanosPerPx * int64(intervalCount))
+				tsEnd := tsStart + nanosPerPx
+				_, intervalMean, _, ok := series.Values(tsStart, tsEnd)
+				if !ok {
+					continue
 				}
-			}
+				if intervalMean == prevIntervalMean && intervalCount > 1 && intervalCount < totalIntervals {
+					// skip adding path elements that do not change the Y coordinate.
+					continue
+				}
+				prevIntervalMean = intervalMean
 
-			stack := clip.Stroke{
-				Path:  p.End(),
-				Width: float32(gtx.Dp(2)),
+				xL := floor((float32(tsStart-domainStart) / float32(domainInterval)) * float32(gtx.Constraints.Max.X))
+				xR := xL + float32(gtx.Dp(1))
+
+				yT := float32(gtx.Constraints.Max.Y) - (float32(intervalMean-c.RangeMin)/rangeInterval)*float32(gtx.Constraints.Max.Y)
+				yB := yT + float32(gtx.Dp(1))
+				if intervalCount == 1 {
+					// The very first interval needs to add special path segments.
+					p.MoveTo(f32.Pt(xR, yT+oneDp))
+					p.LineTo(f32.Pt(xR, yT))
+				} else if prevYT > yT {
+					p.LineTo(f32.Pt(xR, prevYT))
+					p.LineTo(f32.Pt(xR, yT))
+					returnPath = append(returnPath,
+						f32.Pt(xL, prevYT+oneDp),
+						f32.Pt(xL, yB),
+					)
+				} else if prevYT < yT {
+					p.LineTo(f32.Pt(xL, prevYT))
+					p.LineTo(f32.Pt(xL, yT))
+					returnPath = append(returnPath,
+						f32.Pt(xR, prevYT+oneDp),
+						f32.Pt(xR, yB),
+					)
+				}
+				prevYT = yT
+			}
+			for i := range returnPath {
+				p.LineTo(returnPath[len(returnPath)-(i+1)])
+			}
+			p.Close()
+
+			stack := clip.Outline{
+				Path: p.End(),
 			}.Op().Push(gtx.Ops)
 			paint.Fill(gtx.Ops, colors[i%len(colors)])
 			stack.Pop()
 		}
 	}
+	return domainStart, c.DomainMax, 0, c.RangeMax
 }
+
+/*
 func (c *ChartData) layoutStackPlot(gtx C, visibleSamples []Sample, domainMin, domainMax int64) (rangeMax float64) {
 	domainInterval := float32(domainMax - domainMin)
 	if domainInterval == 0 {
@@ -466,6 +498,7 @@ func (c *ChartData) layoutStackPlot(gtx C, visibleSamples []Sample, domainMin, d
 	}
 	return stackRangeMax
 }
+*/
 
 func loop(w *app.Window, headings []string, samples chan Sample) error {
 	var dataMutex sync.Mutex
