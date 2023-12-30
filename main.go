@@ -200,10 +200,12 @@ type ChartData struct {
 }
 
 func (c *ChartData) Insert(sample Sample) {
+	intervalNs := float64(sample.EndTimestampNS - sample.StartTimestampNS)
+	intervalSecs := intervalNs / 1_000_000_000
 	if len(c.Series) == 0 {
 		c.DomainMin = sample.StartTimestampNS
 		c.DomainMax = sample.StartTimestampNS
-		c.RangeMax = sample.Data[0]
+		c.RangeMax = sample.Data[0] / intervalSecs
 		c.Series = make([]Series, len(sample.Data))
 		c.Enabled = make([]*widget.Bool, len(sample.Data))
 		for i := range c.Enabled {
@@ -212,8 +214,6 @@ func (c *ChartData) Insert(sample Sample) {
 		}
 		c.nsPerDp = 10_000_000 // ns/Dp
 	}
-	intervalNs := float64(sample.EndTimestampNS - sample.StartTimestampNS)
-	intervalSecs := intervalNs / 1_000_000_000
 	for i, datum := range sample.Data {
 		// RangeMin should probably always be zero, no matter what the sensors say. None of the
 		// quantities we're measuring can actually be less than zero.
@@ -221,9 +221,8 @@ func (c *ChartData) Insert(sample Sample) {
 		if datum < 0 {
 			datum = 0
 		}
-		datum *= intervalSecs
-		c.RangeMax = max(datum, c.RangeMax)
-		c.Series[i].Insert(sample.EndTimestampNS, datum)
+		c.RangeMax = max(datum/intervalSecs, c.RangeMax)
+		c.Series[i].Insert(sample.StartTimestampNS, sample.EndTimestampNS, datum)
 	}
 	c.DomainMin = min(sample.StartTimestampNS, c.DomainMin)
 	c.DomainMax = max(sample.StartTimestampNS, c.DomainMax)
