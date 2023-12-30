@@ -10,6 +10,8 @@ import (
 	"log"
 	"math"
 	"os"
+	"runtime/pprof"
+	"runtime/trace"
 	"strconv"
 	"strings"
 	"sync"
@@ -105,6 +107,13 @@ func main() {
 		sensorsMain()
 		return
 	}
+	pprof.StartCPUProfile(io.Discard)
+	f, err := os.Create("trace.trace")
+	if err != nil {
+		log.Printf("failed creating trace file: %v", err)
+	} else {
+		trace.Start(f)
+	}
 	go func() {
 		var source io.Reader = os.Stdin
 		if flag.NArg() > 0 {
@@ -138,7 +147,11 @@ func main() {
 
 		w := app.NewWindow()
 		go func() {
-			if err := loop(w, relevantHeadings, samplesChan); err != nil {
+			err := loop(w, relevantHeadings, samplesChan)
+			trace.Stop()
+			f.Close()
+			pprof.StopCPUProfile()
+			if err != nil {
 				log.Fatal(err)
 			}
 			os.Exit(0)
