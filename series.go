@@ -2,6 +2,7 @@ package main
 
 import (
 	"slices"
+	"sort"
 )
 
 // Series represents one data set in a visualization.
@@ -34,64 +35,74 @@ func (s *Series) Insert(startTimestamp, endTimestamp int64, value float64) (inse
 	return true
 }
 
-// Values returns statistics about the data in the half-open time interval
+// RatesBetween returns statistics about the rate of consumption in the half-open time interval
 // [timestampA,timestampB). If is no data in the series, this method will
 // always return zero. If timestampA is less than timestampB, the half open
 // interval [timestampB,timestampA) will be returned. If the interval extends
 // beyond the domain of the data, all data return values will be zero and the
 // ok return value will be false.
-func (s *Series) Values(timestampA, timestampB int64) (maximum, mean, minimum float64, ok bool) {
+func (s *Series) RatesBetween(timestampA, timestampB int64) (maximum, mean, minimum float64, ok bool) {
 	if len(s.startTimestamps) < 1 {
 		return 0, 0, 0, false
 	}
 	if timestampB < timestampA {
 		timestampA, timestampB = timestampB, timestampA
 	}
-	queryInterval := timestampB - timestampA
-	indexA, _ := slices.BinarySearch(s.startTimestamps, timestampA)
-	indexB, _ := slices.BinarySearch(s.startTimestamps, timestampB)
-	if indexA > 0 && s.startTimestamps[indexA] > timestampA {
-		// The sample prior to the search result
-		indexA--
+	indexA := sort.Search(len(s.startTimestamps), func(i int) bool {
+		return timestampA < s.endTimestamps[i]
+	})
+	if indexA == len(s.startTimestamps) {
+		return 0, 0, 0, false
 	}
-	if indexB > 0 && s.startTimestamps[indexB] > timestampB {
-		// The sample prior to the search result
+	indexB := sort.Search(len(s.startTimestamps), func(i int) bool {
+		return timestampB < s.endTimestamps[i]
+	})
+	if indexB == len(s.startTimestamps) {
+		lastEnd := s.endTimestamps[len(s.endTimestamps)-1]
+		if timestampB > lastEnd {
+			return 0, 0, 0, false
+		}
+		// If the last timestamp is exactly equal to the end of the final time, then we can proceed.
 		indexB--
 	}
 	if indexA == indexB {
-		var v float64
-		if indexA == len(s.startTimestamps) {
-			return v, v, v, false
-		} else if indexA < 0 {
-			return v, v, v, false
-		}
-		v = s.values[indexA]
-		interval := s.endTimestamps[indexA] - s.startTimestamps[indexA]
-		ratio := float64(queryInterval) / float64(interval)
-		mean := (v * ratio) / (float64(queryInterval) / 1_000_000_000)
+		v := s.values[indexA]
+		interval := float64(s.endTimestamps[indexA] - s.startTimestamps[indexA])
+		mean := v / (interval / 1_000_000_000)
 		ok = true
-		return v, mean, v, ok
+		return mean, mean, mean, ok
 	}
 	values := s.values[indexA : indexB+1]
-	maximum = values[0]
-	minimum = values[0]
+	hasExtrema := false
 	for i, v := range values {
-		if i == 0 {
-			interval := s.endTimestamps[indexA] - s.startTimestamps[indexA]
-			querySampleInterval := s.endTimestamps[indexA] - timestampA
-			ratio := float64(querySampleInterval) / float64(interval)
-			mean += v * ratio
-		} else if i == len(values)-1 {
-			interval := s.endTimestamps[indexB] - s.startTimestamps[indexB]
-			querySampleInterval := timestampB - s.startTimestamps[indexB]
-			ratio := float64(querySampleInterval) / float64(interval)
-			mean += v * ratio
-		} else {
-			mean += v
+		interval := float64(s.endTimestamps[indexA+i] - s.startTimestamps[indexA+i])
+		if i == 0 || i == len(values)-1 {
+			var querySampleInterval int64
+			if i == 0 {
+				querySampleInterval = s.endTimestamps[indexA] - timestampA
+			} else if i == len(values)-1 {
+				querySampleInterval = timestampB - s.startTimestamps[indexB]
+			}
+			if querySampleInterval == 0 {
+				continue
+			}
+			// Scale the value by the proportion of the sample that is within
+			// the queried period.
+			ratio := float64(querySampleInterval) / interval
+			v = v * ratio
+			interval = float64(querySampleInterval)
 		}
-		maximum = max(maximum, v)
-		minimum = min(minimum, v)
+		mean += v
+		v /= interval / 1_000_000_000
+		if hasExtrema {
+			maximum = max(maximum, v)
+			minimum = min(minimum, v)
+		} else {
+			maximum = v
+			minimum = v
+			hasExtrema = true
+		}
 	}
-	mean /= (float64(queryInterval) / 1_000_000_000)
+	mean /= (float64(timestampB-timestampA) / 1_000_000_000)
 	return maximum, mean, minimum, true
 }

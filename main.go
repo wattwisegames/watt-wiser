@@ -431,7 +431,7 @@ func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin,
 			for intervalCount := 1; intervalCount <= totalIntervals; intervalCount++ {
 				tsStart := domainEnd - (nanosPerPx * int64(intervalCount))
 				tsEnd := tsStart + nanosPerPx
-				_, intervalMean, _, ok := series.Values(tsStart, tsEnd)
+				_, intervalMean, _, ok := series.RatesBetween(tsStart, tsEnd)
 				if !ok {
 					continue
 				}
