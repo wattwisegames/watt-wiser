@@ -441,7 +441,7 @@ func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin,
 				}
 				prevIntervalMean = intervalMean
 
-				xL := floor((float32(tsStart-domainStart) / float32(domainInterval)) * float32(gtx.Constraints.Max.X))
+				xL := float32(gtx.Constraints.Max.X) - float32(gtx.Dp(unit.Dp(intervalCount)))
 				xR := xL + float32(gtx.Dp(1))
 
 				yT := float32(gtx.Constraints.Max.Y) - (float32(intervalMean-c.RangeMin)/rangeInterval)*float32(gtx.Constraints.Max.Y)
