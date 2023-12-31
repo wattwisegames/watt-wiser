@@ -408,6 +408,7 @@ func floor[T constraints.Integer | constraints.Float](a T) T {
 }
 
 func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin, rangeMax float64) {
+	maxY := gtx.Constraints.Max.Y - gtx.Dp(1)
 	numDp := gtx.Metric.PxToDp(gtx.Constraints.Max.X)
 	nanosPerPx := int64(math.Round(float64(c.nsPerDp) / float64(gtx.Metric.PxPerDp)))
 	domainInterval := int64(math.Round(float64(numDp * unit.Dp(c.nsPerDp))))
@@ -444,7 +445,7 @@ func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin,
 				xL := float32(gtx.Constraints.Max.X) - float32(gtx.Dp(unit.Dp(intervalCount)))
 				xR := xL + float32(gtx.Dp(1))
 
-				yT := float32(gtx.Constraints.Max.Y) - (float32(intervalMean-c.RangeMin)/rangeInterval)*float32(gtx.Constraints.Max.Y)
+				yT := float32(maxY) - (float32(intervalMean-c.RangeMin)/rangeInterval)*float32(maxY)
 				yB := yT + float32(gtx.Dp(1))
 				if intervalCount == 1 {
 					// The very first interval needs to add special path segments.
