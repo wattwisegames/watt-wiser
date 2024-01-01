@@ -281,13 +281,13 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 	gtx.Constraints = origConstraints.SubMax(axisLabelDims.Size.Add(image.Pt(0, keyDims.Size.Y)))
 	macro = op.Record(gtx.Ops)
 	dims, domainMin, domainMax, rangeMin, rangeMax := c.layoutPlot(gtx)
-	domainIntervalSecs := float32(domainMax-domainMin) / 1_000_000_000
+	domainIntervalSecs := float64(domainMax-domainMin) / 1_000_000_000
 	plotCall := macro.Stop()
 	gtx.Constraints = origConstraints
 	minRangeLabel.Text = strconv.FormatFloat(rangeMin, 'f', 3, 64)
 	maxRangeLabel := material.Body1(th, strconv.FormatFloat(rangeMax, 'f', 3, 64))
-	minDomainLabel := material.Body1(th, strconv.FormatInt(domainMin, 10))
-	maxDomainLabel := material.Body1(th, strconv.FormatInt(domainMax, 10))
+	minDomainLabel := material.Body1(th, "-"+strconv.FormatFloat(domainIntervalSecs, 'f', 3, 64)+" seconds")
+	maxDomainLabel := material.Body1(th, "-0 seconds")
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{}.Layout(gtx,
@@ -318,7 +318,7 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 						layout.Rigid(func(gtx C) D {
 							return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceBetween}.Layout(gtx,
 								layout.Rigid(minDomainLabel.Layout),
-								layout.Rigid(material.Body2(th, fmt.Sprintf("ns timestamp (%.3fs) scale = %dns/Dp", domainIntervalSecs, c.nsPerDp)).Layout),
+								layout.Rigid(material.Body2(th, fmt.Sprintf("time (spans %.2fs, scale = %dns/Dp)", domainIntervalSecs, c.nsPerDp)).Layout),
 								layout.Rigid(maxDomainLabel.Layout),
 							)
 						}),
