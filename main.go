@@ -432,44 +432,51 @@ func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin,
 			p.Begin(gtx.Ops)
 			prevIntervalMean := 0.0
 			prevYT := float32(0)
+			prevYB := float32(0)
 			for intervalCount := 1; intervalCount <= totalIntervals; intervalCount++ {
 				tsStart := domainEnd - (nanosPerPx * int64(intervalCount))
 				tsEnd := tsStart + nanosPerPx
+				nextTsStart := tsStart - nanosPerPx
 				_, intervalMean, _, ok := series.RatesBetween(tsStart, tsEnd)
 				if !ok {
 					continue
 				}
-				if intervalMean == prevIntervalMean && intervalCount > 1 && intervalCount < totalIntervals {
-					// skip adding path elements that do not change the Y coordinate.
+				_, nextIntervalMean, _, ok := series.RatesBetween(nextTsStart, tsStart)
+				if intervalMean == prevIntervalMean &&
+					nextIntervalMean == intervalMean &&
+					intervalCount > 1 &&
+					intervalCount < totalIntervals &&
+					prevYB-prevYT == oneDp {
+					// We can safely skip processing the current interval if it
+					// has the same value as the previous and next intervals,
+					// is neither the first nor the last interval in the graph,
+					// and the previous segment had the default line thickness.
 					continue
 				}
 				prevIntervalMean = intervalMean
 
 				xL := float32(gtx.Constraints.Max.X) - float32(gtx.Dp(unit.Dp(intervalCount)))
-				xR := xL + float32(gtx.Dp(1))
+				xR := xL + oneDp
 
 				yT := float32(maxY) - (float32(intervalMean-c.RangeMin)/rangeInterval)*float32(maxY)
-				yB := yT + float32(gtx.Dp(1))
+				yB := yT + oneDp
+				nextYT := float32(maxY) - (float32(nextIntervalMean-c.RangeMin)/rangeInterval)*float32(maxY)
+				if nextYT > yT || prevYT > yT {
+					yB = max(nextYT+oneDp, prevYT+oneDp)
+				}
 				if intervalCount == 1 {
 					// The very first interval needs to add special path segments.
-					p.MoveTo(f32.Pt(xR, yT+oneDp))
-					p.LineTo(f32.Pt(xR, yT))
-				} else if prevYT > yT {
-					p.LineTo(f32.Pt(xR, prevYT))
-					p.LineTo(f32.Pt(xR, yT))
-					c.returnPath = append(c.returnPath,
-						f32.Pt(xL, prevYT+oneDp),
-						f32.Pt(xL, yB),
-					)
-				} else if prevYT < yT {
-					p.LineTo(f32.Pt(xL, prevYT))
-					p.LineTo(f32.Pt(xL, yT))
-					c.returnPath = append(c.returnPath,
-						f32.Pt(xR, prevYT+oneDp),
-						f32.Pt(xR, yB),
-					)
+					p.MoveTo(f32.Pt(xR, yT))
+					prevYT = yT
 				}
+				p.LineTo(f32.Pt(xR, prevYT))
+				p.LineTo(f32.Pt(xR, yT))
+				c.returnPath = append(c.returnPath,
+					f32.Pt(xR, prevYB),
+					f32.Pt(xR, yB),
+				)
 				prevYT = yT
+				prevYB = yB
 			}
 			for i := range c.returnPath {
 				p.LineTo(c.returnPath[len(c.returnPath)-(i+1)])
