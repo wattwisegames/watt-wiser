@@ -210,6 +210,9 @@ type ChartData struct {
 	Stacked   widget.Bool
 	scroll    gesture.Scroll
 	nsPerDp   int64
+	// returnPath is a scratch slice used to build each data series'
+	// path.
+	returnPath []f32.Point
 }
 
 func (c *ChartData) Insert(sample Sample) {
@@ -424,9 +427,9 @@ func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin,
 	totalIntervals := gtx.Constraints.Max.X
 	for i, series := range c.Series {
 		if c.Enabled[i].Value {
+			c.returnPath = c.returnPath[:0]
 			var p clip.Path
 			p.Begin(gtx.Ops)
-			returnPath := []f32.Point{}
 			prevIntervalMean := 0.0
 			prevYT := float32(0)
 			for intervalCount := 1; intervalCount <= totalIntervals; intervalCount++ {
@@ -454,22 +457,22 @@ func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin,
 				} else if prevYT > yT {
 					p.LineTo(f32.Pt(xR, prevYT))
 					p.LineTo(f32.Pt(xR, yT))
-					returnPath = append(returnPath,
+					c.returnPath = append(c.returnPath,
 						f32.Pt(xL, prevYT+oneDp),
 						f32.Pt(xL, yB),
 					)
 				} else if prevYT < yT {
 					p.LineTo(f32.Pt(xL, prevYT))
 					p.LineTo(f32.Pt(xL, yT))
-					returnPath = append(returnPath,
+					c.returnPath = append(c.returnPath,
 						f32.Pt(xR, prevYT+oneDp),
 						f32.Pt(xR, yB),
 					)
 				}
 				prevYT = yT
 			}
-			for i := range returnPath {
-				p.LineTo(returnPath[len(returnPath)-(i+1)])
+			for i := range c.returnPath {
+				p.LineTo(c.returnPath[len(c.returnPath)-(i+1)])
 			}
 			p.Close()
 
