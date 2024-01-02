@@ -431,17 +431,21 @@ func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin,
 			var p clip.Path
 			p.Begin(gtx.Ops)
 			prevIntervalMean := 0.0
+			intervalMean := 0.0
 			prevYT := float32(0)
 			prevYB := float32(0)
 			for intervalCount := 1; intervalCount <= totalIntervals; intervalCount++ {
 				tsStart := domainEnd - (nanosPerPx * int64(intervalCount))
 				tsEnd := tsStart + nanosPerPx
 				nextTsStart := tsStart - nanosPerPx
-				_, intervalMean, _, ok := series.RatesBetween(tsStart, tsEnd)
-				if !ok {
-					continue
+				if intervalCount == 1 {
+					var ok bool
+					_, intervalMean, _, ok = series.RatesBetween(tsStart, tsEnd)
+					if !ok {
+						continue
+					}
 				}
-				_, nextIntervalMean, _, ok := series.RatesBetween(nextTsStart, tsStart)
+				_, nextIntervalMean, _, _ := series.RatesBetween(nextTsStart, tsStart)
 				if intervalMean == prevIntervalMean &&
 					nextIntervalMean == intervalMean &&
 					intervalCount > 1 &&
@@ -453,7 +457,6 @@ func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin,
 					// and the previous segment had the default line thickness.
 					continue
 				}
-				prevIntervalMean = intervalMean
 
 				xL := float32(gtx.Constraints.Max.X) - float32(gtx.Dp(unit.Dp(intervalCount)))
 				xR := xL + oneDp
@@ -477,6 +480,8 @@ func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin,
 				)
 				prevYT = yT
 				prevYB = yB
+				prevIntervalMean = intervalMean
+				intervalMean = nextIntervalMean
 			}
 			for i := range c.returnPath {
 				p.LineTo(c.returnPath[len(c.returnPath)-(i+1)])
