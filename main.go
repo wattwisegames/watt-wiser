@@ -514,6 +514,7 @@ func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin,
 		rangeMax = max(rangeMax, series.RangeRateMax)
 		rangeMin = min(rangeMin, series.RangeRateMin)
 	}
+	rangeMax = 10 * ceil(rangeMax*.1)
 	rangeInterval := float32(rangeMax - rangeMin)
 	if rangeInterval == 0 {
 		rangeInterval = 1
