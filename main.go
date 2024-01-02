@@ -293,8 +293,8 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 	domainIntervalSecs := float64(domainMax-domainMin) / 1_000_000_000
 	plotCall := macro.Stop()
 	gtx.Constraints = origConstraints
-	minRangeLabel.Text = strconv.FormatFloat(rangeMin, 'f', 3, 64)
-	maxRangeLabel := material.Body1(th, strconv.FormatFloat(rangeMax, 'f', 3, 64))
+	minRangeLabel.Text = strconv.FormatFloat(rangeMin, 'f', 0, 64)
+	maxRangeLabel := material.Body1(th, strconv.FormatFloat(rangeMax, 'f', 0, 64))
 	minDomainLabel := material.Body1(th, "-"+strconv.FormatFloat(domainIntervalSecs, 'f', 3, 64)+" seconds")
 	maxDomainLabel := material.Body1(th, "-0 seconds")
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
@@ -306,7 +306,23 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 						layout.Flexed(1, func(gtx C) D {
 							return D{Size: gtx.Constraints.Min}
 						}),
-						layout.Rigid(material.Body2(th, "Watts").Layout),
+						layout.Rigid(func(gtx C) D {
+							macro := op.Record(gtx.Ops)
+							dims := material.Body2(th, "Watts").Layout(gtx)
+							call := macro.Stop()
+							halfHeight := float32(dims.Size.Y) * .5
+							defer op.Affine(f32.Affine2D{}.Rotate(
+								f32.Point{
+									X: halfHeight,
+									Y: halfHeight,
+								},
+								-math.Pi/2,
+							)).Push(gtx.Ops).Pop()
+							call.Add(gtx.Ops)
+							dims.Size.X, dims.Size.Y = dims.Size.Y, dims.Size.X
+							dims.Baseline = 0
+							return dims
+						}),
 						layout.Flexed(1, func(gtx C) D {
 							return D{Size: gtx.Constraints.Min}
 						}),
