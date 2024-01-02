@@ -12,6 +12,8 @@ import (
 	"os"
 	"runtime/pprof"
 	"runtime/trace"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -446,16 +448,34 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 			},
 		}.Op())
 		children := []layout.FlexChild{}
+		values := []float64{}
 		for i, _ := range c.Series {
 			if !c.Enabled[i].Value {
 				continue
 			}
-			children = append(children, layout.Rigid(material.Body2(th, strconv.FormatFloat(0, 'f', 3, 64)).Layout))
+			idx := sort.Search(len(c.seriesSlices[i]), func(idx int) bool {
+				return c.seriesSlices[i][idx].xR <= xR
+			})
+			if idx == len(c.seriesSlices[i]) {
+				continue
+			}
+			data := c.seriesSlices[i][idx]
+			insertIdx, _ := slices.BinarySearch(values, data.mean)
+			values = slices.Insert(values, insertIdx, data.mean)
+			children = slices.Insert(children, len(children)-insertIdx, layout.Rigid(material.Body2(th, strconv.FormatFloat(data.mean, 'f', 3, 64)).Layout))
 		}
 		origConstraints := gtx.Constraints
 		gtx.Constraints.Min = image.Point{}
 		hoverInfoMacro := op.Record(gtx.Ops)
-		hoverInfoDims := layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+		hoverInfoDims := layout.Background{}.Layout(gtx,
+			func(gtx layout.Context) layout.Dimensions {
+				paint.FillShape(gtx.Ops, color.NRGBA{R: 255, G: 255, B: 255, A: 150}, clip.Rect{Max: gtx.Constraints.Min}.Op())
+				return D{Size: gtx.Constraints.Min}
+			},
+			func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+			},
+		)
 		hoverInfoCall := hoverInfoMacro.Stop()
 		gtx.Constraints = origConstraints
 
@@ -470,11 +490,13 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 		} else {
 			pos.Y = int(c.pos.Y)
 		}
+		call.Add(gtx.Ops)
 		transform := op.Offset(pos).Push(gtx.Ops)
 		hoverInfoCall.Add(gtx.Ops)
 		transform.Pop()
+	} else {
+		call.Add(gtx.Ops)
 	}
-	call.Add(gtx.Ops)
 	return dims, domainMin, domainMax, rangeMin, rangeMax
 }
 
@@ -501,6 +523,7 @@ func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin,
 	domainEnd := (c.DomainMax / c.nsPerDp) * c.nsPerDp
 	domainStart := domainEnd - domainInterval
 	totalIntervals := gtx.Constraints.Max.X
+
 	for i, series := range c.Series {
 		if c.Enabled[i].Value {
 			c.seriesSlices[i] = c.seriesSlices[i][:0]
@@ -523,6 +546,28 @@ func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin,
 					}
 				}
 				_, nextIntervalMean, _, _ := series.RatesBetween(nextTsStart, tsStart)
+
+				// Compute the X and Y coordinates for this portion of the data.
+				xL := float32(gtx.Constraints.Max.X) - float32(gtx.Dp(unit.Dp(intervalCount)))
+				xR := xL + oneDp
+
+				yT := float32(maxY) - (float32(intervalMean-c.RangeMin)/rangeInterval)*float32(maxY)
+				yB := yT + oneDp
+				nextYT := float32(maxY) - (float32(nextIntervalMean-c.RangeMin)/rangeInterval)*float32(maxY)
+				if nextYT > yT || prevYT > yT {
+					yB = max(nextYT+oneDp, prevYT+oneDp)
+				}
+
+				// record this data in the series for the hover dialog.
+				c.seriesSlices[i] = append(c.seriesSlices[i], timeslice{
+					tsStart: tsStart,
+					tsEnd:   tsEnd,
+					xL:      xL,
+					xR:      xR,
+					y:       yT,
+					mean:    intervalMean,
+				})
+
 				if intervalMean == prevIntervalMean &&
 					nextIntervalMean == intervalMean &&
 					intervalCount > 1 &&
@@ -535,15 +580,6 @@ func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin,
 					continue
 				}
 
-				xL := float32(gtx.Constraints.Max.X) - float32(gtx.Dp(unit.Dp(intervalCount)))
-				xR := xL + oneDp
-
-				yT := float32(maxY) - (float32(intervalMean-c.RangeMin)/rangeInterval)*float32(maxY)
-				yB := yT + oneDp
-				nextYT := float32(maxY) - (float32(nextIntervalMean-c.RangeMin)/rangeInterval)*float32(maxY)
-				if nextYT > yT || prevYT > yT {
-					yB = max(nextYT+oneDp, prevYT+oneDp)
-				}
 				if intervalCount == 1 {
 					// The very first interval needs to add special path segments.
 					p.MoveTo(f32.Pt(xR, yT))
@@ -555,14 +591,6 @@ func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin,
 					f32.Pt(xR, prevYB),
 					f32.Pt(xR, yB),
 				)
-				c.seriesSlices[i] = append(c.seriesSlices[i], timeslice{
-					tsStart: tsStart,
-					tsEnd:   tsEnd,
-					xL:      xL,
-					xR:      xR,
-					y:       yT,
-					mean:    intervalMean,
-				})
 				prevYT = yT
 				prevYB = yB
 				prevIntervalMean = intervalMean
