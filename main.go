@@ -503,6 +503,7 @@ func floor[T constraints.Integer | constraints.Float](a T) T {
 
 func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin, rangeMax float64) {
 	maxY := gtx.Constraints.Max.Y - gtx.Dp(1)
+	maxYDp := gtx.Metric.PxToDp(gtx.Constraints.Max.Y)
 	numDp := gtx.Metric.PxToDp(gtx.Constraints.Max.X)
 	nanosPerPx := int64(math.Round(float64(c.nsPerDp) / float64(gtx.Metric.PxPerDp)))
 	domainInterval := int64(math.Round(float64(numDp * unit.Dp(c.nsPerDp))))
@@ -514,12 +515,34 @@ func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin,
 		rangeMax = max(rangeMax, series.RangeRateMax)
 		rangeMin = min(rangeMin, series.RangeRateMin)
 	}
+	// ensure the range max is a power of ten.
 	rangeMax = 10 * ceil(rangeMax*.1)
+	dPPerWatt := floor(maxYDp / unit.Dp(rangeMax))
+	pxPerWatt := gtx.Dp(dPPerWatt)
+	maxY = gtx.Dp(dPPerWatt * unit.Dp(rangeMax))
+
 	rangeInterval := float32(rangeMax - rangeMin)
 	if rangeInterval == 0 {
 		rangeInterval = 1
 	}
+
 	oneDp := float32(gtx.Dp(1))
+	for gridNum := 1; gridNum*pxPerWatt < maxY; gridNum++ {
+		yT := maxY - gridNum*pxPerWatt
+		a := uint8(50)
+		if gridNum%10 == 0 {
+			a = 100
+		}
+		paint.FillShape(gtx.Ops, color.NRGBA{A: a}, clip.Rect{
+			Min: image.Point{
+				Y: yT,
+			},
+			Max: image.Point{
+				Y: yT + int(oneDp),
+				X: gtx.Constraints.Max.X,
+			},
+		}.Op())
+	}
 	// domainEnd forces the first datapoint to be an even multiple of the current
 	// scale, which prevents weird cross-frame sampling artifacts.
 	domainEnd := (c.DomainMax / c.nsPerDp) * c.nsPerDp
