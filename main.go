@@ -21,6 +21,7 @@ import (
 	"gioui.org/f32"
 	"gioui.org/font/gofont"
 	"gioui.org/gesture"
+	"gioui.org/io/pointer"
 	"gioui.org/io/system"
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -199,20 +200,31 @@ type (
 	D = layout.Dimensions
 )
 
+type timeslice struct {
+	tsStart, tsEnd int64
+	xL, xR         float32
+	y              float32
+	mean           float64
+}
+
 type ChartData struct {
-	RangeMin  float64
-	RangeMax  float64
-	DomainMin int64
-	DomainMax int64
-	Series    []Series
-	Headings  []string
-	Enabled   []*widget.Bool
-	Stacked   widget.Bool
-	scroll    gesture.Scroll
-	nsPerDp   int64
+	RangeMin     float64
+	RangeMax     float64
+	DomainMin    int64
+	DomainMax    int64
+	Series       []Series
+	seriesSlices [][]timeslice
+	Headings     []string
+	Enabled      []*widget.Bool
+	Stacked      widget.Bool
+	scroll       gesture.Scroll
+	nsPerDp      int64
 	// returnPath is a scratch slice used to build each data series'
 	// path.
 	returnPath []f32.Point
+	// hover gesture state
+	pos       f32.Point
+	isHovered bool
 }
 
 func (c *ChartData) Insert(sample Sample) {
@@ -224,6 +236,7 @@ func (c *ChartData) Insert(sample Sample) {
 		c.RangeMax = sample.Data[0] / intervalSecs
 		c.Series = make([]Series, len(sample.Data))
 		c.Enabled = make([]*widget.Bool, len(sample.Data))
+		c.seriesSlices = make([][]timeslice, len(sample.Data))
 		for i := range c.Enabled {
 			c.Enabled[i] = new(widget.Bool)
 			c.Enabled[i].Value = true
@@ -280,7 +293,7 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 	// labels and the key.
 	gtx.Constraints = origConstraints.SubMax(axisLabelDims.Size.Add(image.Pt(0, keyDims.Size.Y)))
 	macro = op.Record(gtx.Ops)
-	dims, domainMin, domainMax, rangeMin, rangeMax := c.layoutPlot(gtx)
+	dims, domainMin, domainMax, rangeMin, rangeMax := c.layoutPlot(gtx, th)
 	domainIntervalSecs := float64(domainMax-domainMin) / 1_000_000_000
 	plotCall := macro.Stop()
 	gtx.Constraints = origConstraints
@@ -382,16 +395,35 @@ func (c *ChartData) layoutKey(gtx C, th *material.Theme) D {
 	})
 }
 
-func (c *ChartData) layoutPlot(gtx C) (dims D, domainMin, domainMax int64, rangeMin, rangeMax float64) {
+func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, domainMax int64, rangeMin, rangeMax float64) {
 	rangeMin = c.RangeMin
 	c.Stacked.Update(gtx)
+	for _, ev := range gtx.Events(c) {
+		switch ev := ev.(type) {
+		case pointer.Event:
+			switch ev.Kind {
+			case pointer.Enter:
+				c.isHovered = true
+				c.pos = ev.Position
+			case pointer.Leave, pointer.Cancel:
+				c.isHovered = false
+			case pointer.Move:
+				c.pos = ev.Position
+			}
+		}
+	}
 	dist := c.scroll.Update(gtx.Metric, gtx.Queue, gtx.Now, gesture.Vertical)
 	if dist != 0 {
 		proportion := 1 + float64(dist)/float64(gtx.Constraints.Max.Y)
 		c.nsPerDp = int64(math.Round(float64(c.nsPerDp) * proportion))
 	}
+	macro := op.Record(gtx.Ops)
 	dims = c.Stacked.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		c.scroll.Add(gtx.Ops, image.Rect(0, -1e6, 0, 1e6))
+		pointer.InputOp{
+			Tag:   c,
+			Kinds: pointer.Enter | pointer.Leave | pointer.Move,
+		}.Add(gtx.Ops)
 		if !c.Stacked.Value {
 			domainMin, domainMax, rangeMin, rangeMax = c.layoutLinePlot(gtx)
 		} else {
@@ -399,6 +431,50 @@ func (c *ChartData) layoutPlot(gtx C) (dims D, domainMin, domainMax int64, range
 		}
 		return D{Size: gtx.Constraints.Max}
 	})
+	call := macro.Stop()
+
+	if c.isHovered {
+		xR := ceil(c.pos.X)
+		xL := xR - float32(gtx.Dp(1))
+		paint.FillShape(gtx.Ops, color.NRGBA{A: 255}, clip.Rect{
+			Min: image.Point{
+				X: int(xL),
+			},
+			Max: image.Point{
+				X: int(xR),
+				Y: gtx.Constraints.Max.Y,
+			},
+		}.Op())
+		children := []layout.FlexChild{}
+		for i, _ := range c.Series {
+			if !c.Enabled[i].Value {
+				continue
+			}
+			children = append(children, layout.Rigid(material.Body2(th, strconv.FormatFloat(0, 'f', 3, 64)).Layout))
+		}
+		origConstraints := gtx.Constraints
+		gtx.Constraints.Min = image.Point{}
+		hoverInfoMacro := op.Record(gtx.Ops)
+		hoverInfoDims := layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+		hoverInfoCall := hoverInfoMacro.Stop()
+		gtx.Constraints = origConstraints
+
+		pos := image.Point{}
+		if int(xL) > gtx.Constraints.Max.X-int(xR) {
+			pos.X = max(int(xL)-hoverInfoDims.Size.X, 0)
+		} else {
+			pos.X = min(int(xR), gtx.Constraints.Max.X-hoverInfoDims.Size.X)
+		}
+		if offscreenY := gtx.Constraints.Max.Y - (int(c.pos.Y) + hoverInfoDims.Size.Y); offscreenY < 0 {
+			pos.Y = int(c.pos.Y) + offscreenY
+		} else {
+			pos.Y = int(c.pos.Y)
+		}
+		transform := op.Offset(pos).Push(gtx.Ops)
+		hoverInfoCall.Add(gtx.Ops)
+		transform.Pop()
+	}
+	call.Add(gtx.Ops)
 	return dims, domainMin, domainMax, rangeMin, rangeMax
 }
 
@@ -427,6 +503,7 @@ func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin,
 	totalIntervals := gtx.Constraints.Max.X
 	for i, series := range c.Series {
 		if c.Enabled[i].Value {
+			c.seriesSlices[i] = c.seriesSlices[i][:0]
 			c.returnPath = c.returnPath[:0]
 			var p clip.Path
 			p.Begin(gtx.Ops)
@@ -478,6 +555,14 @@ func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin,
 					f32.Pt(xR, prevYB),
 					f32.Pt(xR, yB),
 				)
+				c.seriesSlices[i] = append(c.seriesSlices[i], timeslice{
+					tsStart: tsStart,
+					tsEnd:   tsEnd,
+					xL:      xL,
+					xR:      xR,
+					y:       yT,
+					mean:    intervalMean,
+				})
 				prevYT = yT
 				prevYB = yB
 				prevIntervalMean = intervalMean
