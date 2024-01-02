@@ -527,7 +527,7 @@ func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin,
 	}
 
 	oneDp := float32(gtx.Dp(1))
-	for gridNum := 1; gridNum*pxPerWatt < maxY; gridNum++ {
+	for gridNum := 0; gridNum*pxPerWatt < maxY; gridNum++ {
 		yT := maxY - gridNum*pxPerWatt
 		a := uint8(50)
 		if gridNum%10 == 0 {
