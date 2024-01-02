@@ -210,8 +210,6 @@ type timeslice struct {
 }
 
 type ChartData struct {
-	RangeMin     float64
-	RangeMax     float64
 	DomainMin    int64
 	DomainMax    int64
 	Series       []Series
@@ -230,12 +228,9 @@ type ChartData struct {
 }
 
 func (c *ChartData) Insert(sample Sample) {
-	intervalNs := float64(sample.EndTimestampNS - sample.StartTimestampNS)
-	intervalSecs := intervalNs / 1_000_000_000
 	if len(c.Series) == 0 {
 		c.DomainMin = sample.StartTimestampNS
 		c.DomainMax = sample.StartTimestampNS
-		c.RangeMax = sample.Data[0] / intervalSecs
 		c.Series = make([]Series, len(sample.Data))
 		c.Enabled = make([]*widget.Bool, len(sample.Data))
 		c.seriesSlices = make([][]timeslice, len(sample.Data))
@@ -252,7 +247,6 @@ func (c *ChartData) Insert(sample Sample) {
 		if datum < 0 {
 			datum = 0
 		}
-		c.RangeMax = max(datum/intervalSecs, c.RangeMax)
 		c.Series[i].Insert(sample.StartTimestampNS, sample.EndTimestampNS, datum)
 	}
 	c.DomainMin = min(sample.StartTimestampNS, c.DomainMin)
@@ -398,7 +392,6 @@ func (c *ChartData) layoutKey(gtx C, th *material.Theme) D {
 }
 
 func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, domainMax int64, rangeMin, rangeMax float64) {
-	rangeMin = c.RangeMin
 	c.Stacked.Update(gtx)
 	for _, ev := range gtx.Events(c) {
 		switch ev := ev.(type) {
@@ -513,7 +506,15 @@ func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin,
 	numDp := gtx.Metric.PxToDp(gtx.Constraints.Max.X)
 	nanosPerPx := int64(math.Round(float64(c.nsPerDp) / float64(gtx.Metric.PxPerDp)))
 	domainInterval := int64(math.Round(float64(numDp * unit.Dp(c.nsPerDp))))
-	rangeInterval := float32(c.RangeMax - c.RangeMin)
+
+	for i, series := range c.Series {
+		if !c.Enabled[i].Value {
+			continue
+		}
+		rangeMax = max(rangeMax, series.RangeRateMax)
+		rangeMin = min(rangeMin, series.RangeRateMin)
+	}
+	rangeInterval := float32(rangeMax - rangeMin)
 	if rangeInterval == 0 {
 		rangeInterval = 1
 	}
@@ -551,9 +552,9 @@ func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin,
 				xL := float32(gtx.Constraints.Max.X) - float32(gtx.Dp(unit.Dp(intervalCount)))
 				xR := xL + oneDp
 
-				yT := float32(maxY) - (float32(intervalMean-c.RangeMin)/rangeInterval)*float32(maxY)
+				yT := float32(maxY) - (float32(intervalMean-rangeMin)/rangeInterval)*float32(maxY)
 				yB := yT + oneDp
-				nextYT := float32(maxY) - (float32(nextIntervalMean-c.RangeMin)/rangeInterval)*float32(maxY)
+				nextYT := float32(maxY) - (float32(nextIntervalMean-rangeMin)/rangeInterval)*float32(maxY)
 				if nextYT > yT || prevYT > yT {
 					yB = max(nextYT+oneDp, prevYT+oneDp)
 				}
@@ -608,7 +609,7 @@ func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin,
 			stack.Pop()
 		}
 	}
-	return domainStart, domainEnd, 0, c.RangeMax
+	return domainStart, domainEnd, rangeMin, rangeMax
 }
 
 /*

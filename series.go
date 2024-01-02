@@ -7,30 +7,34 @@ import (
 
 // Series represents one data set in a visualization.
 type Series struct {
-	startTimestamps    []int64
-	endTimestamps      []int64
-	values             []float64
-	RangeMax, RangeMin float64
-	Sum                float64
+	startTimestamps            []int64
+	endTimestamps              []int64
+	values                     []float64
+	RangeRateMax, RangeRateMin float64
+	Sum                        float64
 }
 
 // Insert adds a value at a given timestamp to the series. In the event
 // that the series already contains a value at that time, nothing is added
 // and the method returns false. Otherwise, the method returns true.
 func (s *Series) Insert(startTimestamp, endTimestamp int64, value float64) (inserted bool) {
-	if len(s.startTimestamps) < 1 {
-		s.RangeMax = value
-		s.RangeMin = value
-	}
 	index, found := slices.BinarySearch(s.startTimestamps, startTimestamp)
 	if found {
 		return false
 	}
+	rate := (value / (float64(endTimestamp-startTimestamp) / 1_000_000_000))
+
+	if len(s.startTimestamps) < 1 {
+		s.RangeRateMax = rate
+		s.RangeRateMin = rate
+	} else {
+		s.RangeRateMax = max(s.RangeRateMax, rate)
+		s.RangeRateMin = min(s.RangeRateMin, rate)
+	}
 	s.startTimestamps = slices.Insert(s.startTimestamps, index, startTimestamp)
 	s.endTimestamps = slices.Insert(s.endTimestamps, index, endTimestamp)
 	s.values = slices.Insert(s.values, index, value)
-	s.RangeMax = max(s.RangeMax, value)
-	s.RangeMin = min(s.RangeMin, value)
+
 	s.Sum += value
 	return true
 }
