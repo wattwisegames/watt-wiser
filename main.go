@@ -534,21 +534,12 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 				if !c.Stacked.Value {
 					c.layoutLinePlot(gtx, visibleDomainStart, visibleDomainEnd, maxY, pxPerWatt, rangeMax)
 				} else {
-					//			rangeMax = c.layoutStackPlot(gtx, visibleSamples, domainMin, domainMax)
+					c.layoutStackPlot(gtx, visibleDomainStart, visibleDomainEnd, maxY, pxPerWatt, rangeMax)
 				}
 				call := macro.Stop()
 				if c.isHovered {
 					xR := ceil(c.pos.X)
 					xL := xR - float32(gtx.Dp(1))
-					paint.FillShape(gtx.Ops, color.NRGBA{A: 255}, clip.Rect{
-						Min: image.Point{
-							X: int(xL),
-						},
-						Max: image.Point{
-							X: int(xR),
-							Y: gtx.Constraints.Max.Y,
-						},
-					}.Op())
 					children := []layout.FlexChild{}
 					values := []float64{}
 					for i := range c.Series {
@@ -609,6 +600,15 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 						pos.Y = int(c.pos.Y)
 					}
 					call.Add(gtx.Ops)
+					paint.FillShape(gtx.Ops, color.NRGBA{A: 255}, clip.Rect{
+						Min: image.Point{
+							X: int(xL),
+						},
+						Max: image.Point{
+							X: int(xR),
+							Y: gtx.Constraints.Max.Y,
+						},
+					}.Op())
 					transform := op.Offset(pos).Push(gtx.Ops)
 					hoverInfoCall.Add(gtx.Ops)
 					transform.Pop()
@@ -809,44 +809,41 @@ func (c *ChartData) layoutLinePlot(gtx C, domainMin, domainMax int64, maxY, pxPe
 	}
 }
 
-/*
-func (c *ChartData) layoutStackPlot(gtx C, visibleSamples []Sample, domainMin, domainMax int64) (rangeMax float64) {
+func (c *ChartData) layoutStackPlot(gtx C, domainMin, domainMax int64, maxY, pxPerWatt int, rangeMax float64) {
 	domainInterval := float32(domainMax - domainMin)
 	if domainInterval == 0 {
 		domainInterval = 1
 	}
-	stackRangeMax := 0.0
-	for i := range c.Enabled {
-		if c.Enabled[i].Value {
-			stackRangeMax += c.DatasetRanges[i].Max
-		}
-	}
-	rangeInterval := float32(stackRangeMax - c.RangeMin)
+	rangeMin := float64(0)
+	rangeInterval := float32(rangeMax - rangeMin)
 	if rangeInterval == 0 {
 		rangeInterval = 1
 	}
-	stackSums := make([]float64, len(visibleSamples))
-	layers := make([]op.CallOp, 0, len(c.Samples[0].Data))
-	for i := 0; i < len(c.Samples[0].Data); i++ {
+	stackSums := make([]float64, len(c.seriesSlices[0]))
+	layers := make([]op.CallOp, 0, len(c.Series))
+	for i := 0; i < len(c.Series); i++ {
 		if c.Enabled[i].Value {
 			macro := op.Record(gtx.Ops)
 			var p clip.Path
 			p.Begin(gtx.Ops)
 			// Build the path for the top of the area.
-			for sampleIdx, sample := range visibleSamples {
-				datum := sample.Data[i]
-				x := (float32(sample.TimestampNS-domainMin) / domainInterval) * float32(gtx.Constraints.Max.X)
-				datumY := float32(gtx.Constraints.Max.Y) - (float32(datum+stackSums[sampleIdx]-c.RangeMin)/rangeInterval)*float32(gtx.Constraints.Max.Y)
-				pt := f32.Pt(x, datumY)
+			for sampleIdx, sample := range c.seriesSlices[i] {
+				datum := sample.mean
+				xR := sample.xR
+				xL := sample.xL
+				datumY := float32(gtx.Constraints.Max.Y) - (float32(datum+stackSums[sampleIdx]-rangeMin)/rangeInterval)*float32(gtx.Constraints.Max.Y)
+				ptR := f32.Pt(xR, datumY)
+				ptL := f32.Pt(xL, datumY)
 				if sampleIdx == 0 {
-					p.MoveTo(pt)
+					p.MoveTo(ptR)
 				} else {
-					p.LineTo(f32.Pt(x, datumY))
+					p.LineTo(ptR)
 				}
+				p.LineTo(ptL)
 				stackSums[sampleIdx] += datum
 			}
-			p.LineTo(layout.FPt(gtx.Constraints.Max))
 			p.LineTo(f32.Pt(0, float32(gtx.Constraints.Max.Y)))
+			p.LineTo(layout.FPt(gtx.Constraints.Max))
 			p.Close()
 
 			stack := clip.Outline{
@@ -860,9 +857,7 @@ func (c *ChartData) layoutStackPlot(gtx C, visibleSamples []Sample, domainMin, d
 	for i := len(layers) - 1; i >= 0; i-- {
 		layers[i].Add(gtx.Ops)
 	}
-	return stackRangeMax
 }
-*/
 
 func loop(w *app.Window, headings []string, samples chan Sample) error {
 	var dataMutex sync.Mutex
