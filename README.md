@@ -2,6 +2,8 @@
 
 A software energy consumption estimation tool built as part of the [Watt-Wise Game Jam](https://wattwise.games/).
 
+![demo gif](./img/watt-wiser-demo.gif)
+
 ## Status
 
 Unstable and experimental, but usable for simple visualization. The GUI is functional on Linux, macOS, and Windows, but the sensors executable that actually collects data currently only supports Linux. Interested users of other OSes can still try the GUI out on the included example trace file.
