@@ -17,7 +17,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"gioui.org/app"
 	"gioui.org/f32"
@@ -34,69 +33,8 @@ import (
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 	"gioui.org/x/outlay"
-	"git.sr.ht/~whereswaldon/energy/hwmon"
-	"git.sr.ht/~whereswaldon/energy/rapl"
-	"git.sr.ht/~whereswaldon/energy/sensors"
 	"golang.org/x/exp/constraints"
 )
-
-func sensorsMain() {
-	raplWatches, err := rapl.FindRAPL()
-	if err != nil {
-		log.Fatal(err)
-	}
-	relevantSubfeatures, err := hwmon.FindEnergySensors()
-	if err != nil {
-		log.Fatal(err)
-	}
-	sensorList := make([]sensors.Sensor, 0, len(raplWatches)+len(relevantSubfeatures))
-	for _, w := range raplWatches {
-		sensorList = append(sensorList, w)
-	}
-	for _, s := range relevantSubfeatures {
-		sensorList = append(sensorList, s)
-	}
-	fmt.Printf("sample start (ns), sample end (ns), ")
-	for _, s := range sensorList {
-		fmt.Printf("%s (%s), ", s.Name(), s.Unit())
-		if s.Unit() == sensors.Watts {
-			fmt.Printf("integrated %s (%s),", s.Name(), sensors.Joules)
-		}
-	}
-	fmt.Println()
-	lastReadTime := time.Now()
-	// Pre-read every sensor once to ensure that incremental sensors emit coherent first values.
-	for _, chip := range sensorList {
-		_, err := chip.Read()
-		if err != nil {
-			log.Fatalf("failed reading value: %v", err)
-			return
-		}
-	}
-	sampleRate := time.Millisecond * 100
-	sampleRateSeconds := float64(sampleRate) / float64(time.Second)
-	ticker := time.NewTicker(sampleRate)
-	defer ticker.Stop()
-	for {
-		select {
-		case t := <-ticker.C:
-			fmt.Printf("%d, %d, ", lastReadTime.UnixNano(), t.UnixNano())
-			for _, chip := range sensorList {
-				v, err := chip.Read()
-				if err != nil {
-					log.Fatalf("failed reading value: %v", err)
-					return
-				}
-				fmt.Printf("%f, ", v)
-				if chip.Unit() == sensors.Watts {
-					fmt.Printf("%f, ", v*sampleRateSeconds)
-				}
-			}
-			fmt.Println()
-			lastReadTime = t
-		}
-	}
-}
 
 type Sample struct {
 	StartTimestampNS, EndTimestampNS int64
@@ -104,18 +42,33 @@ type Sample struct {
 }
 
 func main() {
-	runSensors := flag.Bool("sensors", false, "read sensor data and emit as CSV on stdout")
-	flag.Parse()
-	if *runSensors {
-		sensorsMain()
-		return
+	var traceInto string
+	flag.StringVar(&traceInto, "trace", "", "collect a go runtime trace into the given file")
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(), `%[1]s: visualize a csv energy trace file
+Usage:
+
+ %[1]s [flags] <file>
+
+OR
+
+ watt-wiser-sensors | %[1]s [flags]
+
+Flags:
+`, os.Args[0])
+		flag.PrintDefaults()
 	}
-	pprof.StartCPUProfile(io.Discard)
-	f, err := os.Create("trace.trace")
-	if err != nil {
-		log.Printf("failed creating trace file: %v", err)
-	} else {
-		trace.Start(f)
+	flag.Parse()
+	var f *os.File
+	if traceInto != "" {
+		pprof.StartCPUProfile(io.Discard)
+		var err error
+		f, err = os.Create(traceInto)
+		if err != nil {
+			log.Printf("failed creating trace file: %v", err)
+		} else {
+			trace.Start(f)
+		}
 	}
 	go func() {
 		var source io.Reader = os.Stdin
@@ -148,12 +101,14 @@ func main() {
 			}
 		}
 
-		w := app.NewWindow()
+		w := app.NewWindow(app.Title("Watt Wiser"))
 		go func() {
 			err := loop(w, relevantHeadings, samplesChan)
-			trace.Stop()
-			f.Close()
-			pprof.StopCPUProfile()
+			if traceInto != "" {
+				trace.Stop()
+				f.Close()
+				pprof.StopCPUProfile()
+			}
 			if err != nil {
 				log.Fatal(err)
 			}
