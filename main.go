@@ -285,7 +285,8 @@ func (c *ChartData) layoutYAxisLabels(gtx C, th *material.Theme, pxPerWatt int, 
 	// Measure the (presumably) widest label.
 	maxYLine := int(floor(maxRange))
 	label := material.Body1(th, strconv.Itoa(maxYLine))
-	labelDims, labelCall := rec(gtx, label.Layout)
+	maxLabelDims, maxLabelCall := rec(gtx, label.Layout)
+	halfLabelWidth := maxLabelDims.Size.X / 2
 
 	gap := gtx.Dp(10)
 
@@ -304,11 +305,12 @@ func (c *ChartData) layoutYAxisLabels(gtx C, th *material.Theme, pxPerWatt int, 
 			minDims := label.Layout(gtx)
 
 			usedX := minDims.Size.X + gap
+			maxX := gtx.Constraints.Max.X - maxLabelDims.Size.X
 
 			for i := 1; i < maxYLine; i++ {
-				if usedX+labelDims.Size.X/2 > pxPerWatt*i {
+				if usedX+halfLabelWidth > pxPerWatt*i {
 					continue
-				} else if usedX+labelDims.Size.X+gap > gtx.Constraints.Max.X-labelDims.Size.X {
+				} else if pxPerWatt*i+halfLabelWidth+gap > maxX {
 					break
 				}
 				label.Text = strconv.Itoa(i)
@@ -321,13 +323,13 @@ func (c *ChartData) layoutYAxisLabels(gtx C, th *material.Theme, pxPerWatt int, 
 				usedX = pxPerWatt*i + labelDims.Size.X/2 + gap
 			}
 			stack := op.Offset(image.Point{
-				X: gtx.Constraints.Max.X - labelDims.Size.X,
+				X: gtx.Constraints.Max.X - maxLabelDims.Size.X,
 			}).Push(gtx.Ops)
-			labelCall.Add(gtx.Ops)
+			maxLabelCall.Add(gtx.Ops)
 			stack.Pop()
 			return D{Size: image.Point{
 				X: gtx.Constraints.Max.X,
-				Y: labelDims.Size.Y,
+				Y: maxLabelDims.Size.Y,
 			}}
 		}),
 	)
@@ -513,6 +515,8 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 	// scale, which prevents weird cross-frame sampling artifacts.
 	visibleDomainEnd := ((c.DomainMax + c.xOffset) / c.nsPerDp) * c.nsPerDp
 	visibleDomainStart := visibleDomainEnd - visibleDomainInterval
+	var maxY int
+	maxY, pxPerWatt, rangeMax = c.computeRange(gtx)
 
 	dims = c.Stacked.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Stack{Alignment: layout.S}.Layout(gtx,
@@ -524,8 +528,10 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 					Tag:   c,
 					Kinds: pointer.Enter | pointer.Leave | pointer.Move,
 				}.Add(gtx.Ops)
+				// Draw grid underneath plot.
+				c.layoutYAxisGrid(gtx, maxY, pxPerWatt)
 				if !c.Stacked.Value {
-					pxPerWatt, rangeMin, rangeMax = c.layoutLinePlot(gtx, visibleDomainStart, visibleDomainEnd)
+					c.layoutLinePlot(gtx, visibleDomainStart, visibleDomainEnd, maxY, pxPerWatt, rangeMax)
 				} else {
 					//			rangeMax = c.layoutStackPlot(gtx, visibleSamples, domainMin, domainMax)
 				}
@@ -636,17 +642,22 @@ func floor[T constraints.Integer | constraints.Float](a T) T {
 	return T(math.Floor(float64(a)))
 }
 
-func (c *ChartData) layoutLinePlot(gtx C, domainMin, domainMax int64) (pxPerWatt int, rangeMin, rangeMax float64) {
-	maxY := gtx.Constraints.Max.Y - gtx.Dp(1)
+func (c *ChartData) computeRange(gtx C) (maxY, pxPerWatt int, rangeMax float64) {
+	maxY = gtx.Constraints.Max.Y - gtx.Dp(1)
 	maxYDp := gtx.Metric.PxToDp(gtx.Constraints.Max.Y)
-	nanosPerPx := int64(math.Round(float64(c.nsPerDp) / float64(gtx.Metric.PxPerDp)))
+	var (
+		rangeSum float64
+	)
 
 	for i, series := range c.Series {
 		if !c.Enabled[i].Value {
 			continue
 		}
 		rangeMax = max(rangeMax, series.RangeRateMax)
-		rangeMin = min(rangeMin, series.RangeRateMin)
+		rangeSum += series.RangeRateMax
+	}
+	if c.Stacked.Value {
+		rangeMax = rangeSum
 	}
 	// ensure the range max is a power of ten.
 	rangeMax = 10 * ceil(rangeMax*.1)
@@ -654,12 +665,10 @@ func (c *ChartData) layoutLinePlot(gtx C, domainMin, domainMax int64) (pxPerWatt
 	pxPerWatt = gtx.Dp(dPPerWatt)
 	// Add back any pixels that weren't used by our power-of-ten scaling.
 	rangeMax += (float64(maxY) - float64(pxPerWatt)*rangeMax) / float64(pxPerWatt)
+	return maxY, pxPerWatt, rangeMax
+}
 
-	rangeInterval := float32(rangeMax - rangeMin)
-	if rangeInterval == 0 {
-		rangeInterval = 1
-	}
-
+func (c *ChartData) layoutYAxisGrid(gtx C, maxY, pxPerWatt int) {
 	oneDp := float32(gtx.Dp(1))
 	for gridNum := 0; gridNum*pxPerWatt < maxY; gridNum++ {
 		yT := maxY - gridNum*pxPerWatt
@@ -677,6 +686,18 @@ func (c *ChartData) layoutLinePlot(gtx C, domainMin, domainMax int64) (pxPerWatt
 			},
 		}.Op())
 	}
+}
+
+func (c *ChartData) layoutLinePlot(gtx C, domainMin, domainMax int64, maxY, pxPerWatt int, rangeMax float64) {
+	nanosPerPx := int64(math.Round(float64(c.nsPerDp) / float64(gtx.Metric.PxPerDp)))
+
+	rangeMin := float64(0)
+	rangeInterval := float32(rangeMax - rangeMin)
+	if rangeInterval == 0 {
+		rangeInterval = 1
+	}
+
+	oneDp := float32(gtx.Dp(1))
 	totalIntervals := gtx.Constraints.Max.X
 
 	for i, series := range c.Series {
@@ -763,7 +784,6 @@ func (c *ChartData) layoutLinePlot(gtx C, domainMin, domainMax int64) (pxPerWatt
 			stack.Pop()
 		}
 	}
-	return pxPerWatt, rangeMin, rangeMax
 }
 
 /*
