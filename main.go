@@ -517,6 +517,7 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 		children := []layout.FlexChild{}
 		values := []float64{}
 		for i := range c.Series {
+			i := i
 			if !c.Enabled[i].Value {
 				continue
 			}
@@ -529,7 +530,17 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 			data := c.seriesSlices[i][idx]
 			insertIdx, _ := slices.BinarySearch(values, data.mean)
 			values = slices.Insert(values, insertIdx, data.mean)
-			children = slices.Insert(children, len(children)-insertIdx, layout.Rigid(material.Body2(th, strconv.FormatFloat(data.mean, 'f', 3, 64)).Layout))
+			children = slices.Insert(children, len(children)-insertIdx, layout.Rigid(func(gtx C) D {
+				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+					layout.Rigid(material.Body2(th, strconv.FormatFloat(data.mean, 'f', 3, 64)).Layout),
+					layout.Rigid(layout.Spacer{Width: 8}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						size := image.Pt(gtx.Dp(8), gtx.Dp(8))
+						paint.FillShape(gtx.Ops, colors[i], clip.Ellipse{Max: size}.Op(gtx.Ops))
+						return D{Size: size}
+					}),
+				)
+			}))
 		}
 		origConstraints := gtx.Constraints
 		gtx.Constraints.Min = image.Point{}
