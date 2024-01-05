@@ -516,7 +516,7 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 		}.Op())
 		children := []layout.FlexChild{}
 		values := []float64{}
-		for i, _ := range c.Series {
+		for i := range c.Series {
 			if !c.Enabled[i].Value {
 				continue
 			}
@@ -540,7 +540,12 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 				return D{Size: gtx.Constraints.Min}
 			},
 			func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+				return layout.UniformInset(10).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{
+						Axis:      layout.Vertical,
+						Alignment: layout.End,
+					}.Layout(gtx, children...)
+				})
 			},
 		)
 		hoverInfoCall := hoverInfoMacro.Stop()
