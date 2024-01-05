@@ -266,6 +266,83 @@ var colors = []color.NRGBA{
 	{R: 0xf0, G: 0xf0, A: 0xff},
 }
 
+func rec(gtx C, w layout.Widget) (D, op.CallOp) {
+	macro := op.Record(gtx.Ops)
+	dims := w(gtx)
+	call := macro.Stop()
+	return dims, call
+}
+
+func (c *ChartData) layoutYAxisLabels(gtx C, th *material.Theme, pxPerWatt int, minRange, maxRange float64) D {
+	origConstraints := gtx.Constraints
+	// Flip X and Y to draw our axis horizontally.
+	gtx.Constraints.Max.X, gtx.Constraints.Max.Y = gtx.Constraints.Max.Y, gtx.Constraints.Max.X
+	gtx.Constraints.Min = image.Point{}
+
+	// Measure the (presumably) widest label.
+	maxYLine := int(floor(maxRange))
+	label := material.Body1(th, strconv.Itoa(maxYLine))
+	labelDims, labelCall := rec(gtx, label.Layout)
+
+	gap := gtx.Dp(10)
+
+	axisMacro := op.Record(gtx.Ops)
+
+	axisDims := layout.Flex{
+		Axis:      layout.Vertical,
+		Alignment: layout.Middle,
+	}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return material.Body2(th, fmt.Sprintf("Power Draw in Watts (scale = %.1f Dp/Watt)", gtx.Metric.PxToDp(pxPerWatt))).Layout(gtx)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			// Lay out the minimum label.
+			label.Text = strconv.Itoa(0)
+			minDims := label.Layout(gtx)
+
+			usedX := minDims.Size.X + gap
+
+			for i := 1; i < maxYLine; i++ {
+				if usedX+labelDims.Size.X/2 > pxPerWatt*i {
+					continue
+				} else if usedX+labelDims.Size.X+gap > gtx.Constraints.Max.X-labelDims.Size.X {
+					break
+				}
+				label.Text = strconv.Itoa(i)
+				labelDims, labelCall := rec(gtx, label.Layout)
+				stack := op.Offset(image.Point{
+					X: pxPerWatt*i - labelDims.Size.X/2,
+				}).Push(gtx.Ops)
+				labelCall.Add(gtx.Ops)
+				stack.Pop()
+				usedX = pxPerWatt*i + labelDims.Size.X/2 + gap
+			}
+			stack := op.Offset(image.Point{
+				X: gtx.Constraints.Max.X - labelDims.Size.X,
+			}).Push(gtx.Ops)
+			labelCall.Add(gtx.Ops)
+			stack.Pop()
+			return D{Size: image.Point{
+				X: gtx.Constraints.Max.X,
+				Y: labelDims.Size.Y,
+			}}
+		}),
+	)
+
+	axisCall := axisMacro.Stop()
+
+	halfAxisHeight := float32(axisDims.Size.Y) * .5
+
+	defer op.Affine(
+		f32.Affine2D{}.
+			Rotate(f32.Pt(halfAxisHeight, halfAxisHeight), -math.Pi/2).
+			Offset(f32.Point{Y: float32(gtx.Constraints.Max.X - axisDims.Size.Y)}),
+	).Push(gtx.Ops).Pop()
+	axisCall.Add(gtx.Ops)
+
+	return D{Size: origConstraints.Max}
+}
+
 func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 	if len(c.Series) < 1 {
 		return D{Size: gtx.Constraints.Max}
@@ -287,14 +364,15 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 
 	// Lay out the plot in the remaining space after accounting for axis
 	// labels and the key.
-	gtx.Constraints = origConstraints.SubMax(axisLabelDims.Size.Add(image.Pt(0, keyDims.Size.Y)))
+	gtx.Constraints = origConstraints.SubMax(image.Point{
+		X: axisLabelDims.Size.Y * 2,
+		Y: axisLabelDims.Size.Y,
+	}.Add(image.Pt(0, keyDims.Size.Y)))
 	macro = op.Record(gtx.Ops)
-	dims, domainMin, domainMax, rangeMin, rangeMax := c.layoutPlot(gtx, th)
+	dims, domainMin, domainMax, pxPerWatt, rangeMin, rangeMax := c.layoutPlot(gtx, th)
 	domainIntervalSecs := float64(domainMax-domainMin) / 1_000_000_000
 	plotCall := macro.Stop()
 	gtx.Constraints = origConstraints
-	minRangeLabel.Text = strconv.FormatFloat(rangeMin, 'f', 0, 64)
-	maxRangeLabel := material.Body1(th, strconv.FormatFloat(rangeMax, 'f', 0, 64))
 	minDomainLabel := material.Body1(th, "-"+strconv.FormatFloat(domainIntervalSecs, 'f', 3, 64)+" seconds")
 	maxDomainLabel := material.Body1(th, "-0 seconds")
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
@@ -302,31 +380,11 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 			return layout.Flex{}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{Axis: layout.Vertical, Spacing: layout.SpaceBetween}.Layout(gtx,
-						layout.Rigid(maxRangeLabel.Layout),
 						layout.Flexed(1, func(gtx C) D {
-							return D{Size: gtx.Constraints.Min}
+							gtx.Constraints.Min = image.Point{}
+							gtx.Constraints.Max.X = axisLabelDims.Size.Y * 2
+							return c.layoutYAxisLabels(gtx, th, pxPerWatt, rangeMin, rangeMax)
 						}),
-						layout.Rigid(func(gtx C) D {
-							macro := op.Record(gtx.Ops)
-							dims := material.Body2(th, "Watts").Layout(gtx)
-							call := macro.Stop()
-							halfHeight := float32(dims.Size.Y) * .5
-							defer op.Affine(f32.Affine2D{}.Rotate(
-								f32.Point{
-									X: halfHeight,
-									Y: halfHeight,
-								},
-								-math.Pi/2,
-							)).Push(gtx.Ops).Pop()
-							call.Add(gtx.Ops)
-							dims.Size.X, dims.Size.Y = dims.Size.Y, dims.Size.X
-							dims.Baseline = 0
-							return dims
-						}),
-						layout.Flexed(1, func(gtx C) D {
-							return D{Size: gtx.Constraints.Min}
-						}),
-						layout.Rigid(minRangeLabel.Layout),
 						layout.Rigid(func(gtx C) D {
 							return D{Size: image.Point{
 								Y: axisLabelDims.Size.Y,
@@ -343,7 +401,7 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 						layout.Rigid(func(gtx C) D {
 							return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceBetween}.Layout(gtx,
 								layout.Rigid(minDomainLabel.Layout),
-								layout.Rigid(material.Body2(th, fmt.Sprintf("time (spans %.2fs, scale = %dns/Dp)", domainIntervalSecs, c.nsPerDp)).Layout),
+								layout.Rigid(material.Body2(th, fmt.Sprintf("Time (spans %.2f s, scale = %d ns/Dp)", domainIntervalSecs, c.nsPerDp)).Layout),
 								layout.Rigid(maxDomainLabel.Layout),
 							)
 						}),
@@ -407,7 +465,7 @@ func (c *ChartData) layoutKey(gtx C, th *material.Theme) D {
 	})
 }
 
-func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, domainMax int64, rangeMin, rangeMax float64) {
+func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, domainMax int64, pxPerWatt int, rangeMin, rangeMax float64) {
 	c.Stacked.Update(gtx)
 	for _, ev := range gtx.Events(c) {
 		switch ev := ev.(type) {
@@ -436,7 +494,7 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 			Kinds: pointer.Enter | pointer.Leave | pointer.Move,
 		}.Add(gtx.Ops)
 		if !c.Stacked.Value {
-			domainMin, domainMax, rangeMin, rangeMax = c.layoutLinePlot(gtx)
+			domainMin, domainMax, pxPerWatt, rangeMin, rangeMax = c.layoutLinePlot(gtx)
 		} else {
 			//			rangeMax = c.layoutStackPlot(gtx, visibleSamples, domainMin, domainMax)
 		}
@@ -506,7 +564,7 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 	} else {
 		call.Add(gtx.Ops)
 	}
-	return dims, domainMin, domainMax, rangeMin, rangeMax
+	return dims, domainMin, domainMax, pxPerWatt, rangeMin, rangeMax
 }
 
 func ceil[T constraints.Integer | constraints.Float](a T) T {
@@ -517,7 +575,7 @@ func floor[T constraints.Integer | constraints.Float](a T) T {
 	return T(math.Floor(float64(a)))
 }
 
-func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin, rangeMax float64) {
+func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, pxPerWatt int, rangeMin, rangeMax float64) {
 	maxY := gtx.Constraints.Max.Y - gtx.Dp(1)
 	maxYDp := gtx.Metric.PxToDp(gtx.Constraints.Max.Y)
 	numDp := gtx.Metric.PxToDp(gtx.Constraints.Max.X)
@@ -534,8 +592,9 @@ func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin,
 	// ensure the range max is a power of ten.
 	rangeMax = 10 * ceil(rangeMax*.1)
 	dPPerWatt := floor(maxYDp / unit.Dp(rangeMax))
-	pxPerWatt := gtx.Dp(dPPerWatt)
-	maxY = gtx.Dp(dPPerWatt * unit.Dp(rangeMax))
+	pxPerWatt = gtx.Dp(dPPerWatt)
+	// Add back any pixels that weren't used by our power-of-ten scaling.
+	rangeMax += (float64(maxY) - float64(pxPerWatt)*rangeMax) / float64(pxPerWatt)
 
 	rangeInterval := float32(rangeMax - rangeMin)
 	if rangeInterval == 0 {
@@ -649,7 +708,7 @@ func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, rangeMin,
 			stack.Pop()
 		}
 	}
-	return domainStart, domainEnd, rangeMin, rangeMax
+	return domainStart, domainEnd, pxPerWatt, rangeMin, rangeMax
 }
 
 /*
