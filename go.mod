@@ -3,7 +3,7 @@ module git.sr.ht/~whereswaldon/energy
 go 1.21.0
 
 require (
-	gioui.org v0.4.1
+	gioui.org v0.4.2-0.20240104175706-fe2a164d30c4
 	gioui.org/x v0.4.0
 	golang.org/x/exp v0.0.0-20230905200255-921286631fa9
 )
