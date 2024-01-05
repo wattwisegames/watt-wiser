@@ -514,10 +514,10 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 	visibleDomainEnd := ((c.DomainMax + c.xOffset) / c.nsPerDp) * c.nsPerDp
 	visibleDomainStart := visibleDomainEnd - visibleDomainInterval
 
-	macro := op.Record(gtx.Ops)
 	dims = c.Stacked.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+		return layout.Stack{Alignment: layout.S}.Layout(gtx,
+			layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+				macro := op.Record(gtx.Ops)
 				c.pan.Add(gtx.Ops, image.Rect(-1e6, 0, 1e6, 0))
 				c.zoom.Add(gtx.Ops, image.Rect(0, -1e6, 0, 1e6))
 				pointer.InputOp{
@@ -529,9 +529,88 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 				} else {
 					//			rangeMax = c.layoutStackPlot(gtx, visibleSamples, domainMin, domainMax)
 				}
+				call := macro.Stop()
+				if c.isHovered {
+					xR := ceil(c.pos.X)
+					xL := xR - float32(gtx.Dp(1))
+					paint.FillShape(gtx.Ops, color.NRGBA{A: 255}, clip.Rect{
+						Min: image.Point{
+							X: int(xL),
+						},
+						Max: image.Point{
+							X: int(xR),
+							Y: gtx.Constraints.Max.Y,
+						},
+					}.Op())
+					children := []layout.FlexChild{}
+					values := []float64{}
+					for i := range c.Series {
+						i := i
+						if !c.Enabled[i].Value {
+							continue
+						}
+						idx := sort.Search(len(c.seriesSlices[i]), func(idx int) bool {
+							return c.seriesSlices[i][idx].xR <= xR
+						})
+						if idx == len(c.seriesSlices[i]) {
+							continue
+						}
+						data := c.seriesSlices[i][idx]
+						insertIdx, _ := slices.BinarySearch(values, data.mean)
+						values = slices.Insert(values, insertIdx, data.mean)
+						children = slices.Insert(children, len(children)-insertIdx, layout.Rigid(func(gtx C) D {
+							return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+								layout.Rigid(material.Body2(th, strconv.FormatFloat(data.mean, 'f', 3, 64)).Layout),
+								layout.Rigid(layout.Spacer{Width: 8}.Layout),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									size := image.Pt(gtx.Dp(8), gtx.Dp(8))
+									paint.FillShape(gtx.Ops, colors[i], clip.Ellipse{Max: size}.Op(gtx.Ops))
+									return D{Size: size}
+								}),
+							)
+						}))
+					}
+					origConstraints := gtx.Constraints
+					gtx.Constraints.Min = image.Point{}
+					hoverInfoMacro := op.Record(gtx.Ops)
+					hoverInfoDims := layout.Background{}.Layout(gtx,
+						func(gtx layout.Context) layout.Dimensions {
+							paint.FillShape(gtx.Ops, color.NRGBA{R: 255, G: 255, B: 255, A: 150}, clip.Rect{Max: gtx.Constraints.Min}.Op())
+							return D{Size: gtx.Constraints.Min}
+						},
+						func(gtx layout.Context) layout.Dimensions {
+							return layout.UniformInset(10).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return layout.Flex{
+									Axis:      layout.Vertical,
+									Alignment: layout.End,
+								}.Layout(gtx, children...)
+							})
+						},
+					)
+					hoverInfoCall := hoverInfoMacro.Stop()
+					gtx.Constraints = origConstraints
+
+					pos := image.Point{}
+					if int(xL) > gtx.Constraints.Max.X-int(xR) {
+						pos.X = max(int(xL)-hoverInfoDims.Size.X, 0)
+					} else {
+						pos.X = min(int(xR), gtx.Constraints.Max.X-hoverInfoDims.Size.X)
+					}
+					if offscreenY := gtx.Constraints.Max.Y - (int(c.pos.Y) + hoverInfoDims.Size.Y); offscreenY < 0 {
+						pos.Y = int(c.pos.Y) + offscreenY
+					} else {
+						pos.Y = int(c.pos.Y)
+					}
+					call.Add(gtx.Ops)
+					transform := op.Offset(pos).Push(gtx.Ops)
+					hoverInfoCall.Add(gtx.Ops)
+					transform.Pop()
+				} else {
+					call.Add(gtx.Ops)
+				}
 				return D{Size: gtx.Constraints.Max}
 			}),
-			layout.Rigid(func(gtx C) D {
+			layout.Expanded(func(gtx C) D {
 				end := visibleDomainEnd - c.DomainMin
 				start := visibleDomainStart - c.DomainMin
 				vpStart := float32(start) / float32(totalDomainInterval)
@@ -540,90 +619,12 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 				scrollbar.Track.MajorPadding = 0
 				scrollbar.Track.MinorPadding = 0
 				scrollbar.Indicator.CornerRadius = 0
+				scrollbar.Indicator.Color.A = 100
 				return scrollbar.Layout(gtx, layout.Horizontal, vpStart, vpEnd)
 			}),
 		)
 	})
-	call := macro.Stop()
 
-	if c.isHovered {
-		xR := ceil(c.pos.X)
-		xL := xR - float32(gtx.Dp(1))
-		paint.FillShape(gtx.Ops, color.NRGBA{A: 255}, clip.Rect{
-			Min: image.Point{
-				X: int(xL),
-			},
-			Max: image.Point{
-				X: int(xR),
-				Y: gtx.Constraints.Max.Y,
-			},
-		}.Op())
-		children := []layout.FlexChild{}
-		values := []float64{}
-		for i := range c.Series {
-			i := i
-			if !c.Enabled[i].Value {
-				continue
-			}
-			idx := sort.Search(len(c.seriesSlices[i]), func(idx int) bool {
-				return c.seriesSlices[i][idx].xR <= xR
-			})
-			if idx == len(c.seriesSlices[i]) {
-				continue
-			}
-			data := c.seriesSlices[i][idx]
-			insertIdx, _ := slices.BinarySearch(values, data.mean)
-			values = slices.Insert(values, insertIdx, data.mean)
-			children = slices.Insert(children, len(children)-insertIdx, layout.Rigid(func(gtx C) D {
-				return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-					layout.Rigid(material.Body2(th, strconv.FormatFloat(data.mean, 'f', 3, 64)).Layout),
-					layout.Rigid(layout.Spacer{Width: 8}.Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						size := image.Pt(gtx.Dp(8), gtx.Dp(8))
-						paint.FillShape(gtx.Ops, colors[i], clip.Ellipse{Max: size}.Op(gtx.Ops))
-						return D{Size: size}
-					}),
-				)
-			}))
-		}
-		origConstraints := gtx.Constraints
-		gtx.Constraints.Min = image.Point{}
-		hoverInfoMacro := op.Record(gtx.Ops)
-		hoverInfoDims := layout.Background{}.Layout(gtx,
-			func(gtx layout.Context) layout.Dimensions {
-				paint.FillShape(gtx.Ops, color.NRGBA{R: 255, G: 255, B: 255, A: 150}, clip.Rect{Max: gtx.Constraints.Min}.Op())
-				return D{Size: gtx.Constraints.Min}
-			},
-			func(gtx layout.Context) layout.Dimensions {
-				return layout.UniformInset(10).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{
-						Axis:      layout.Vertical,
-						Alignment: layout.End,
-					}.Layout(gtx, children...)
-				})
-			},
-		)
-		hoverInfoCall := hoverInfoMacro.Stop()
-		gtx.Constraints = origConstraints
-
-		pos := image.Point{}
-		if int(xL) > gtx.Constraints.Max.X-int(xR) {
-			pos.X = max(int(xL)-hoverInfoDims.Size.X, 0)
-		} else {
-			pos.X = min(int(xR), gtx.Constraints.Max.X-hoverInfoDims.Size.X)
-		}
-		if offscreenY := gtx.Constraints.Max.Y - (int(c.pos.Y) + hoverInfoDims.Size.Y); offscreenY < 0 {
-			pos.Y = int(c.pos.Y) + offscreenY
-		} else {
-			pos.Y = int(c.pos.Y)
-		}
-		call.Add(gtx.Ops)
-		transform := op.Offset(pos).Push(gtx.Ops)
-		hoverInfoCall.Add(gtx.Ops)
-		transform.Pop()
-	} else {
-		call.Add(gtx.Ops)
-	}
 	return dims, visibleDomainStart, visibleDomainEnd, pxPerWatt, rangeMin, rangeMax
 }
 
