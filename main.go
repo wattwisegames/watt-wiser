@@ -517,6 +517,7 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 	visibleDomainStart := visibleDomainEnd - visibleDomainInterval
 	var maxY int
 	maxY, pxPerWatt, rangeMax = c.computeRange(gtx)
+	c.computeVisible(gtx, maxY, visibleDomainStart, visibleDomainEnd, rangeMax)
 
 	dims = c.Stacked.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Stack{Alignment: layout.S}.Layout(gtx,
@@ -668,6 +669,52 @@ func (c *ChartData) computeRange(gtx C) (maxY, pxPerWatt int, rangeMax float64) 
 	return maxY, pxPerWatt, rangeMax
 }
 
+func (c *ChartData) computeVisible(gtx C, maxY int, domainMin, domainMax int64, rangeMax float64) {
+	nanosPerPx := int64(math.Round(float64(c.nsPerDp) / float64(gtx.Metric.PxPerDp)))
+
+	rangeMin := float64(0)
+	rangeInterval := float32(rangeMax - rangeMin)
+	if rangeInterval == 0 {
+		rangeInterval = 1
+	}
+
+	oneDp := float32(gtx.Dp(1))
+	totalIntervals := gtx.Constraints.Max.X
+	for i, series := range c.Series {
+		if c.Enabled[i].Value {
+			c.seriesSlices[i] = c.seriesSlices[i][:0]
+			c.returnPath = c.returnPath[:0]
+			intervalMean := 0.0
+			for intervalCount := 1; intervalCount <= totalIntervals; intervalCount++ {
+				tsStart := domainMax - (nanosPerPx * int64(intervalCount))
+				tsEnd := tsStart + nanosPerPx
+				var ok bool
+				_, intervalMean, _, ok = series.RatesBetween(tsStart, tsEnd)
+				if !ok {
+					continue
+				}
+
+				// Compute the X and Y coordinates for this portion of the data.
+				xL := float32(gtx.Constraints.Max.X) - float32(gtx.Dp(unit.Dp(intervalCount)))
+				xR := xL + oneDp
+
+				yT := float32(maxY) - (float32(intervalMean-rangeMin)/rangeInterval)*float32(maxY)
+
+				// record this data in the series for the hover dialog.
+				c.seriesSlices[i] = append(c.seriesSlices[i], timeslice{
+					tsStart: tsStart,
+					tsEnd:   tsEnd,
+					xL:      xL,
+					xR:      xR,
+					y:       yT,
+					mean:    intervalMean,
+				})
+
+			}
+		}
+	}
+}
+
 func (c *ChartData) layoutYAxisGrid(gtx C, maxY, pxPerWatt int) {
 	oneDp := float32(gtx.Dp(1))
 	for gridNum := 0; gridNum*pxPerWatt < maxY; gridNum++ {
@@ -689,8 +736,6 @@ func (c *ChartData) layoutYAxisGrid(gtx C, maxY, pxPerWatt int) {
 }
 
 func (c *ChartData) layoutLinePlot(gtx C, domainMin, domainMax int64, maxY, pxPerWatt int, rangeMax float64) {
-	nanosPerPx := int64(math.Round(float64(c.nsPerDp) / float64(gtx.Metric.PxPerDp)))
-
 	rangeMin := float64(0)
 	rangeInterval := float32(rangeMax - rangeMin)
 	if rangeInterval == 0 {
@@ -698,56 +743,33 @@ func (c *ChartData) layoutLinePlot(gtx C, domainMin, domainMax int64, maxY, pxPe
 	}
 
 	oneDp := float32(gtx.Dp(1))
-	totalIntervals := gtx.Constraints.Max.X
 
-	for i, series := range c.Series {
+	for i := range c.Series {
 		if c.Enabled[i].Value {
-			c.seriesSlices[i] = c.seriesSlices[i][:0]
 			c.returnPath = c.returnPath[:0]
 			var p clip.Path
 			p.Begin(gtx.Ops)
 			prevIntervalMean := 0.0
-			intervalMean := 0.0
 			prevYT := float32(0)
 			prevYB := float32(0)
-			for intervalCount := 1; intervalCount <= totalIntervals; intervalCount++ {
-				tsStart := domainMax - (nanosPerPx * int64(intervalCount))
-				tsEnd := tsStart + nanosPerPx
-				nextTsStart := tsStart - nanosPerPx
-				if intervalCount == 1 {
-					var ok bool
-					_, intervalMean, _, ok = series.RatesBetween(tsStart, tsEnd)
-					if !ok {
-						continue
-					}
-				}
-				_, nextIntervalMean, _, _ := series.RatesBetween(nextTsStart, tsStart)
-
-				// Compute the X and Y coordinates for this portion of the data.
-				xL := float32(gtx.Constraints.Max.X) - float32(gtx.Dp(unit.Dp(intervalCount)))
-				xR := xL + oneDp
-
-				yT := float32(maxY) - (float32(intervalMean-rangeMin)/rangeInterval)*float32(maxY)
+			for dataIndex, seriesData := range c.seriesSlices[i] {
+				intervalMean := seriesData.mean
+				xR := seriesData.xR
+				yT := seriesData.y
 				yB := yT + oneDp
+				var nextIntervalMean float64
+				if dataIndex < len(c.seriesSlices[i])-1 {
+					nextIntervalMean = c.seriesSlices[i][dataIndex+1].mean
+				}
 				nextYT := float32(maxY) - (float32(nextIntervalMean-rangeMin)/rangeInterval)*float32(maxY)
 				if nextYT > yT || prevYT > yT {
 					yB = max(nextYT+oneDp, prevYT+oneDp)
 				}
 
-				// record this data in the series for the hover dialog.
-				c.seriesSlices[i] = append(c.seriesSlices[i], timeslice{
-					tsStart: tsStart,
-					tsEnd:   tsEnd,
-					xL:      xL,
-					xR:      xR,
-					y:       yT,
-					mean:    intervalMean,
-				})
-
 				if intervalMean == prevIntervalMean &&
 					nextIntervalMean == intervalMean &&
-					intervalCount > 1 &&
-					intervalCount < totalIntervals &&
+					dataIndex > 0 &&
+					dataIndex < len(c.seriesSlices[i])-1 &&
 					prevYB-prevYT == oneDp {
 					// We can safely skip processing the current interval if it
 					// has the same value as the previous and next intervals,
@@ -756,7 +778,7 @@ func (c *ChartData) layoutLinePlot(gtx C, domainMin, domainMax int64, maxY, pxPe
 					continue
 				}
 
-				if intervalCount == 1 {
+				if dataIndex == 0 {
 					// The very first interval needs to add special path segments.
 					p.MoveTo(f32.Pt(xR, yT))
 					prevYT = yT
@@ -772,6 +794,7 @@ func (c *ChartData) layoutLinePlot(gtx C, domainMin, domainMax int64, maxY, pxPe
 				prevIntervalMean = intervalMean
 				intervalMean = nextIntervalMean
 			}
+
 			for i := range c.returnPath {
 				p.LineTo(c.returnPath[len(c.returnPath)-(i+1)])
 			}
