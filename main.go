@@ -217,7 +217,9 @@ type ChartData struct {
 	Headings     []string
 	Enabled      []*widget.Bool
 	Stacked      widget.Bool
-	scroll       gesture.Scroll
+	zoom         gesture.Scroll
+	pan          gesture.Scroll
+	xOffset      int64
 	nsPerDp      int64
 	// returnPath is a scratch slice used to build each data series'
 	// path.
@@ -481,14 +483,22 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 			}
 		}
 	}
-	dist := c.scroll.Update(gtx.Metric, gtx.Queue, gtx.Now, gesture.Vertical)
+	dist := c.zoom.Update(gtx.Metric, gtx.Queue, gtx.Now, gesture.Vertical)
 	if dist != 0 {
 		proportion := 1 + float64(dist)/float64(gtx.Constraints.Max.Y)
 		c.nsPerDp = int64(math.Round(float64(c.nsPerDp) * proportion))
 	}
+	dist = c.pan.Update(gtx.Metric, gtx.Queue, gtx.Now, gesture.Horizontal)
+	if dist != 0 {
+		pannedNS := int64(gtx.Metric.PxToDp(dist) * unit.Dp(c.nsPerDp))
+		if c.xOffset+pannedNS <= 0 && c.DomainMax+c.xOffset+pannedNS >= c.DomainMin {
+			c.xOffset += pannedNS
+		}
+	}
 	macro := op.Record(gtx.Ops)
 	dims = c.Stacked.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		c.scroll.Add(gtx.Ops, image.Rect(0, -1e6, 0, 1e6))
+		c.pan.Add(gtx.Ops, image.Rect(-1e6, 0, 1e6, 0))
+		c.zoom.Add(gtx.Ops, image.Rect(0, -1e6, 0, 1e6))
 		pointer.InputOp{
 			Tag:   c,
 			Kinds: pointer.Enter | pointer.Leave | pointer.Move,
@@ -636,7 +646,7 @@ func (c *ChartData) layoutLinePlot(gtx C) (domainMin, domainMax int64, pxPerWatt
 	}
 	// domainEnd forces the first datapoint to be an even multiple of the current
 	// scale, which prevents weird cross-frame sampling artifacts.
-	domainEnd := (c.DomainMax / c.nsPerDp) * c.nsPerDp
+	domainEnd := ((c.DomainMax + c.xOffset) / c.nsPerDp) * c.nsPerDp
 	domainStart := domainEnd - domainInterval
 	totalIntervals := gtx.Constraints.Max.X
 
