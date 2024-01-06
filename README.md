@@ -10,7 +10,7 @@ Unstable and experimental, but usable for simple visualization. The GUI is funct
 
 # GUI
 
-To build the GUI, you'll need the latest version of [Go](https://golang.org/dl) and the [dependencies for Gio](https://gioui.org/doc/install/), the GUI toolkit in use.
+To build the GUI, you'll need the latest version of [Go](https://golang.org/dl) and the [dependencies for Gio](https://gioui.org/doc/install), the GUI toolkit in use.
 
 You can then build the gui with:
 
