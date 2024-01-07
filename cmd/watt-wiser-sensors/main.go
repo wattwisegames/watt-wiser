@@ -53,6 +53,7 @@ as root.
 		}
 	}
 	fmt.Println()
+	samples := make([]float64, len(sensorList))
 	lastReadTime := time.Now()
 	// Pre-read every sensor once to ensure that incremental sensors emit coherent first values.
 	for _, chip := range sensorList {
@@ -68,21 +69,40 @@ as root.
 	defer ticker.Stop()
 	for {
 		select {
-		case t := <-ticker.C:
-			fmt.Printf("%d, %d, ", lastReadTime.UnixNano(), t.UnixNano())
-			for _, chip := range sensorList {
-				v, err := chip.Read()
-				if err != nil {
-					log.Fatalf("failed reading value: %v", err)
-					return
+		case sampleEndTime := <-ticker.C:
+			for {
+				for chipIdx, chip := range sensorList {
+					v, err := chip.Read()
+					if err != nil {
+						log.Fatalf("failed reading value: %v", err)
+						return
+					}
+					if chip.Unit() == sensors.Joules {
+						samples[chipIdx] += v
+					} else if chip.Unit() == sensors.Watts {
+						// There's not a clearly-correct way to combine the data. Average it for now.
+						samples[chipIdx] *= .5
+						samples[chipIdx] += .5 * v
+					}
 				}
+				readFinishedAt := time.Now()
+				if readFinishedAt.Sub(sampleEndTime) < sampleRate {
+					// This sample was not interrupted mid-read, so we're good.
+					break
+				}
+				sampleEndTime = readFinishedAt
+			}
+			fmt.Printf("%d, %d, ", lastReadTime.UnixNano(), sampleEndTime.UnixNano())
+			for chipIdx, chip := range sensorList {
+				v := samples[chipIdx]
+				samples[chipIdx] = 0
 				fmt.Printf("%f, ", v)
 				if chip.Unit() == sensors.Watts {
 					fmt.Printf("%f, ", v*sampleRateSeconds)
 				}
 			}
 			fmt.Println()
-			lastReadTime = t
+			lastReadTime = sampleEndTime
 		}
 	}
 }
