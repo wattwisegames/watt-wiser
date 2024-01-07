@@ -93,12 +93,13 @@ as root.
 				sampleEndTime = readFinishedAt
 			}
 			fmt.Printf("%d, %d, ", lastReadTime.UnixNano(), sampleEndTime.UnixNano())
+			samleInterval := sampleEndTime.Sub(lastReadTime)
 			for chipIdx, chip := range sensorList {
 				v := samples[chipIdx]
 				samples[chipIdx] = 0
 				fmt.Printf("%f, ", v)
 				if chip.Unit() == sensors.Watts {
-					fmt.Printf("%f, ", v*sampleRateSeconds)
+					fmt.Printf("%f, ", v*samleInterval.Seconds())
 				}
 			}
 			fmt.Println()
