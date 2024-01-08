@@ -64,46 +64,39 @@ as root.
 		}
 	}
 	sampleRate := time.Millisecond * 100
-	sampleRateSeconds := float64(sampleRate) / float64(time.Second)
 	ticker := time.NewTicker(sampleRate)
 	defer ticker.Stop()
 	for {
 		select {
 		case sampleEndTime := <-ticker.C:
-			for {
-				for chipIdx, chip := range sensorList {
-					v, err := chip.Read()
-					if err != nil {
-						log.Fatalf("failed reading value: %v", err)
-						return
-					}
-					if chip.Unit() == sensors.Joules {
-						samples[chipIdx] += v
-					} else if chip.Unit() == sensors.Watts {
-						// There's not a clearly-correct way to combine the data. Average it for now.
-						samples[chipIdx] *= .5
-						samples[chipIdx] += .5 * v
-					}
-				}
-				readFinishedAt := time.Now()
-				if readFinishedAt.Sub(sampleEndTime) < sampleRate {
-					// This sample was not interrupted mid-read, so we're good.
-					break
-				}
-				sampleEndTime = readFinishedAt
-			}
-			fmt.Printf("%d, %d, ", lastReadTime.UnixNano(), sampleEndTime.UnixNano())
-			samleInterval := sampleEndTime.Sub(lastReadTime)
 			for chipIdx, chip := range sensorList {
-				v := samples[chipIdx]
-				samples[chipIdx] = 0
-				fmt.Printf("%f, ", v)
-				if chip.Unit() == sensors.Watts {
-					fmt.Printf("%f, ", v*samleInterval.Seconds())
+				v, err := chip.Read()
+				if err != nil {
+					log.Fatalf("failed reading value: %v", err)
+					return
 				}
+				samples[chipIdx] = v
 			}
-			fmt.Println()
+			readFinishedAt := time.Now()
+			if readDuration := readFinishedAt.Sub(lastReadTime); readDuration < sampleRate*2 {
+				// This sample was not interrupted mid-read, so we're good.
+				fmt.Printf("%d, %d, ", lastReadTime.UnixNano(), sampleEndTime.UnixNano())
+				sampleInterval := sampleEndTime.Sub(lastReadTime)
+				for chipIdx, chip := range sensorList {
+					v := samples[chipIdx]
+					fmt.Printf("%f, ", v)
+					if chip.Unit() == sensors.Watts {
+						fmt.Printf("%f, ", v*sampleInterval.Seconds())
+					}
+				}
+				fmt.Println()
+			} else {
+				log.Printf("dropping sample with read duration %d >= sample rate %d", readDuration, sampleRate)
+			}
 			lastReadTime = sampleEndTime
+			for i := range samples {
+				samples[i] = 0
+			}
 		}
 	}
 }
