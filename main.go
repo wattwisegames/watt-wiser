@@ -617,7 +617,7 @@ func (c *ChartData) computeRange(gtx C) (maxY, pxPerWatt int, rangeMax float64) 
 	}
 	// ensure the range max is a power of ten.
 	rangeMax = 10 * ceil(rangeMax*.1)
-	dPPerWatt := floor(maxYDp / unit.Dp(rangeMax))
+	dPPerWatt := max(floor(maxYDp/unit.Dp(rangeMax)), 1)
 	pxPerWatt = gtx.Dp(dPPerWatt)
 	// Add back any pixels that weren't used by our power-of-ten scaling.
 	rangeMax += (float64(maxY) - float64(pxPerWatt)*rangeMax) / float64(pxPerWatt)
