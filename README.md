@@ -12,6 +12,24 @@ Unstable and experimental, but usable for simple visualization. The GUI is funct
 
 To build the GUI, you'll need the latest version of [Go](https://golang.org/dl) and the [dependencies for Gio](https://gioui.org/doc/install), the GUI toolkit in use.
 
+First, you'll need to clone the repo:
+
+```
+git clone https://github.com/wattwisegames/watt-wiser
+```
+
+OR from the other source:
+
+```
+git clone https://git.sr.ht/~whereswaldon/watt-wiser
+```
+
+Enter the project directory:
+
+```
+cd watt-wiser
+```
+
 You can then build the gui with:
 
 ```
@@ -47,7 +65,27 @@ When viewing the data in stacked area mode, `core` and `dram` should be toggled 
 
 The sensors executable is currently only supported on Linux, but we'd like to expand it to support all platforms. If you're interested in helping out, please get in touch!
 
-We rely upon `libsensors` to read data from the kernel HWMON subsystem. Install it (and its header files) with your system package manager. You'll also need a functioning C toolchain. You can then build the sensors with:
+We rely upon `libsensors` to read data from the kernel HWMON subsystem. Install it (and its header files) with your system package manager. You'll need [Go](https://golang.org/dl) installed and a functioning C toolchain.
+
+First, you'll need to clone the repo (unless you already have):
+
+```
+git clone https://github.com/wattwisegames/watt-wiser
+```
+
+OR from the other source:
+
+```
+git clone https://git.sr.ht/~whereswaldon/watt-wiser
+```
+
+Enter the project directory:
+
+```
+cd watt-wiser
+```
+
+You can then build the sensors with:
 
 ```
 go build -o watt-wiser-sensors ./cmd/watt-wiser-sensors
