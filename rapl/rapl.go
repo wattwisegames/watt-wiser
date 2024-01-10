@@ -1,3 +1,5 @@
+//go:build linux
+
 package rapl
 
 import (
@@ -52,8 +54,8 @@ func (w *watchFile) Read() (float64, error) {
 	return float64(increment) * sensors.MicroToUnprefixed, nil
 }
 
-func FindRAPL() ([]*watchFile, error) {
-	watchFiles := []*watchFile{}
+func FindRAPL() ([]sensors.Sensor, error) {
+	watchFiles := []sensors.Sensor{}
 	if err := filepath.WalkDir(
 		"/sys/devices/virtual/powercap/intel-rapl",
 		func(path string, d fs.DirEntry, err error) error {
