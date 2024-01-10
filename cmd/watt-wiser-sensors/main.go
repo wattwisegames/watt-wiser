@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"git.sr.ht/~whereswaldon/energy/hwmon"
+	_ "git.sr.ht/~whereswaldon/energy/nvml"
 	"git.sr.ht/~whereswaldon/energy/rapl"
 	"git.sr.ht/~whereswaldon/energy/sensors"
 )
