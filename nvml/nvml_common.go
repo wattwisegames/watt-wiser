@@ -1,10 +1,18 @@
 package nvml
 
-import "sync"
+import (
+	"fmt"
+	"sync"
+
+	"git.sr.ht/~whereswaldon/energy/sensors"
+)
 
 var (
-	once                                sync.Once
-	initErr                             error
+	// once protects the initialization process.
+	once sync.Once
+	// initErr tracks whether the one-time initialization succeeded or failed.
+	initErr error
+	// The rest of these are wrapper funcs populated by initialization.
 	nvmlInit                            func() error
 	nvmlSystemGetNVMLVersion            func() (string, error)
 	nvmlDeviceGetCount                  func() (uint64, error)
@@ -14,6 +22,81 @@ var (
 	nvmlDeviceGetPowerUsage             func(device uintptr) (uint32, error)
 )
 
+func load() error {
+	once.Do(func() {
+		initErr = platformInit()
+	})
+	return initErr
+}
+
+func FindGPUSensors() ([]sensors.Sensor, error) {
+	if err := load(); err != nil {
+		return nil, err
+	}
+	if err := nvmlInit(); err != nil {
+		return nil, fmt.Errorf("failed initializing nvml: %w", err)
+	}
+	count, err := nvmlDeviceGetCount()
+	if err != nil {
+		return nil, fmt.Errorf("failed counting gpus: %w", err)
+	}
+	out := []sensors.Sensor{}
+	for i := uint64(0); i < count; i++ {
+		device, err := nvmlDeviceGetHandleByIndex(i)
+		if err != nil {
+			continue
+		}
+		arch, err := nvmlDeviceGetArchitecture(device)
+		if err != nil {
+			continue
+		}
+		s := sensor{
+			name:   fmt.Sprintf("NVIDIA GPU %d", i),
+			device: device,
+		}
+		if arch >= NVML_DEVICE_ARCH_VOLTA {
+			s.unit = sensors.Joules
+		} else {
+			s.unit = sensors.Watts
+		}
+		out = append(out, &s)
+	}
+	return out, nil
+}
+
+type sensor struct {
+	name       string
+	unit       sensors.Unit
+	device     uintptr
+	lastReadUJ uint64
+}
+
+func (s *sensor) Name() string {
+	return s.name
+}
+
+func (s *sensor) Unit() sensors.Unit {
+	return s.unit
+}
+
+func (s *sensor) Read() (float64, error) {
+	if s.unit == sensors.Watts {
+		mW, err := nvmlDeviceGetPowerUsage(s.device)
+		if err != nil {
+			return 0, err
+		}
+		return float64(mW) / 1000, nil
+	}
+	uJ, err := nvmlDeviceGetTotalEnergyConsumption(s.device)
+	if err != nil {
+		return 0, err
+	}
+	uJ, s.lastReadUJ = uJ-s.lastReadUJ, uJ
+	return float64(uJ) / 1_000_000, nil
+}
+
+var _ sensors.Sensor = (*sensor)(nil)
+
 const (
 	symbolNvmlInit_v2                         string = "nvmlInit_v2"
 	symbolNvmlSystemGetNVMLVersion            string = "nvmlSystemGetNVMLVersion"
@@ -22,20 +105,6 @@ const (
 	symbolNvmlDeviceGetTotalEnergyConsumption string = "nvmlDeviceGetTotalEnergyConsumption"
 	symbolNvmlDeviceGetPowerUsage             string = "nvmlDeviceGetPowerUsage"
 	symbolNvmlDeviceGetArchitecture           string = "nvmlDeviceGetArchitecture"
-)
-
-func load() error {
-	once.Do(func() {
-		initErr = platformInit()
-	})
-	return initErr
-}
-
-type sensorKind bool
-
-const (
-	energy sensorKind = true
-	power  sensorKind = false
 )
 
 const (
