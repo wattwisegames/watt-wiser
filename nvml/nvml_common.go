@@ -2,6 +2,7 @@ package nvml
 
 import (
 	"fmt"
+	"log"
 	"sync"
 
 	"git.sr.ht/~whereswaldon/energy/sensors"
@@ -17,6 +18,7 @@ var (
 	nvmlSystemGetNVMLVersion            func() (string, error)
 	nvmlDeviceGetCount                  func() (uint64, error)
 	nvmlDeviceGetHandleByIndex          func(i uint64) (uintptr, error)
+	nvmlDeviceGetName func(device uintptr) (string, error)
 	nvmlDeviceGetArchitecture           func(device uintptr) (nvmlDeviceArchitecture, error)
 	nvmlDeviceGetTotalEnergyConsumption func(device uintptr) (uint64, error)
 	nvmlDeviceGetPowerUsage             func(device uintptr) (uint32, error)
@@ -36,6 +38,11 @@ func FindGPUSensors() ([]sensors.Sensor, error) {
 	if err := nvmlInit(); err != nil {
 		return nil, fmt.Errorf("failed initializing nvml: %w", err)
 	}
+	version, err := nvmlSystemGetNVMLVersion()
+	if err != nil {
+		return nil, fmt.Errorf("failed querying nvml version: %w", err)
+	}
+	log.Printf("Using NVML version %q", version)
 	count, err := nvmlDeviceGetCount()
 	if err != nil {
 		return nil, fmt.Errorf("failed counting gpus: %w", err)
@@ -44,19 +51,40 @@ func FindGPUSensors() ([]sensors.Sensor, error) {
 	for i := uint64(0); i < count; i++ {
 		device, err := nvmlDeviceGetHandleByIndex(i)
 		if err != nil {
+			log.Printf("failed acquiring handle to NVIDIA GPU at index %d: %v", i, err)
 			continue
 		}
-		arch, err := nvmlDeviceGetArchitecture(device)
+		name, err := nvmlDeviceGetName(device)
 		if err != nil {
+			log.Printf("failed loading NVIDIA GPU name at index %d: %v", i, err)
 			continue
 		}
 		s := sensor{
-			name:   fmt.Sprintf("NVIDIA GPU %d", i),
+			name:   name,
 			device: device,
 		}
-		if arch >= NVML_DEVICE_ARCH_VOLTA {
-			s.unit = sensors.Joules
+		if nvmlDeviceGetTotalEnergyConsumption != nil {
+			// If we can't query architecture, but we can check energy, just try reading
+			// energy to check if it's supported.
+			_, err = nvmlDeviceGetTotalEnergyConsumption(device)
+			if err != nil {
+				_, err = nvmlDeviceGetPowerUsage(device)
+				if err != nil {
+					// This device does not support power monitoring of any kind.
+					log.Printf("discarding NVIDIA GPU %q because does not support power monitoring: %v", name, err)
+					continue
+				}
+				s.unit = sensors.Watts
+			} else {
+				s.unit = sensors.Joules
+			}
 		} else {
+			_, err = nvmlDeviceGetPowerUsage(device)
+			if err != nil {
+				// This device does not support power monitoring of any kind.
+				log.Printf("discarding NVIDIA GPU %q because does not support power monitoring: %v", name, err)
+				continue
+			}
 			s.unit = sensors.Watts
 		}
 		out = append(out, &s)
@@ -102,9 +130,25 @@ const (
 	symbolNvmlSystemGetNVMLVersion            string = "nvmlSystemGetNVMLVersion"
 	symbolNvmlDeviceGetCount_v2               string = "nvmlDeviceGetCount_v2"
 	symbolNvmlDeviceGetHandleByIndex_v2       string = "nvmlDeviceGetHandleByIndex_v2"
+	symbolNvmlDeviceGetName string = "nvmlDeviceGetName"
 	symbolNvmlDeviceGetTotalEnergyConsumption string = "nvmlDeviceGetTotalEnergyConsumption"
 	symbolNvmlDeviceGetPowerUsage             string = "nvmlDeviceGetPowerUsage"
 	symbolNvmlDeviceGetArchitecture           string = "nvmlDeviceGetArchitecture"
+)
+
+var (
+	requiredSymbols = []string{
+		symbolNvmlInit_v2,
+		symbolNvmlSystemGetNVMLVersion,
+		symbolNvmlDeviceGetCount_v2,
+		symbolNvmlDeviceGetHandleByIndex_v2,
+		symbolNvmlDeviceGetPowerUsage,
+		symbolNvmlDeviceGetName,
+	}
+	optionalSymbols = []string{
+		symbolNvmlDeviceGetTotalEnergyConsumption,
+		symbolNvmlDeviceGetArchitecture,
+	}
 )
 
 const (

@@ -5,6 +5,7 @@ package nvml
 import (
 	"fmt"
 	"os"
+	"strings"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -30,16 +31,6 @@ func platformInit() error {
 	}
 
 	resolved := map[string]*windows.LazyProc{}
-	requiredSymbols := []string{
-		symbolNvmlInit_v2,
-		symbolNvmlSystemGetNVMLVersion,
-		symbolNvmlDeviceGetCount_v2,
-		symbolNvmlDeviceGetHandleByIndex_v2,
-		symbolNvmlDeviceGetTotalEnergyConsumption,
-		symbolNvmlDeviceGetPowerUsage,
-		symbolNvmlDeviceGetArchitecture,
-	}
-	optionalSymbols := []string{}
 
 	for _, symbol := range requiredSymbols {
 		lazySym := nvml.NewProc(symbol)
@@ -57,68 +48,74 @@ func platformInit() error {
 	}
 
 	// Build wrappers for required symbols
-	f := resolved[symbolNvmlInit_v2]
 	nvmlInit = func() error {
-		rc, _, _ := f.Call()
+		rc, _, _ := resolved[symbolNvmlInit_v2].Call()
 		if rc := nvmlError(rc); rc != NVML_SUCCESS {
 			return rc
 		}
 		return nil
 	}
-	f = resolved[symbolNvmlSystemGetNVMLVersion]
 	nvmlSystemGetNVMLVersion = func() (string, error) {
 		var version [16]byte
-		rc, _, _ := f.Call(uintptr(unsafe.Pointer(&version)), uintptr(len(version)))
+		rc, _, _ := resolved[symbolNvmlSystemGetNVMLVersion].Call(uintptr(unsafe.Pointer(&version)), uintptr(len(version)))
 		if rc := nvmlError(rc); rc != NVML_SUCCESS {
 			return "", rc
 		}
-		return string(version[:]), nil
+		return strings.ReplaceAll(string(version[:]), "\000", ""), nil
 	}
-	f = resolved[symbolNvmlDeviceGetCount_v2]
 	nvmlDeviceGetCount = func() (uint64, error) {
 		var count uint64
-		rc, _, _ := f.Call(uintptr(unsafe.Pointer(&count)))
+		rc, _, _ := resolved[symbolNvmlDeviceGetCount_v2].Call(uintptr(unsafe.Pointer(&count)))
 		if rc := nvmlError(rc); rc != NVML_SUCCESS {
 			return 0, rc
 		}
 		return count, nil
 
 	}
-	f = resolved[symbolNvmlDeviceGetHandleByIndex_v2]
 	nvmlDeviceGetHandleByIndex = func(i uint64) (uintptr, error) {
 		var device uintptr
-		rc, _, _ := f.Call(uintptr(i), uintptr(unsafe.Pointer(&device)))
+		rc, _, _ := resolved[symbolNvmlDeviceGetHandleByIndex_v2].Call(uintptr(i), uintptr(unsafe.Pointer(&device)))
 		if rc := nvmlError(rc); rc != NVML_SUCCESS {
 			return 0, rc
 		}
 		return device, nil
 	}
-	f = resolved[symbolNvmlDeviceGetTotalEnergyConsumption]
-	nvmlDeviceGetTotalEnergyConsumption = func(device uintptr) (uint64, error) {
-		var uJ uint64
-		rc, _, _ := f.Call(device, uintptr(unsafe.Pointer(&uJ)))
+	nvmlDeviceGetName = func(device uintptr) (string, error) {
+		var buf [96]byte 
+		rc, _, _ := resolved[symbolNvmlDeviceGetName].Call(device, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
 		if rc := nvmlError(rc); rc != NVML_SUCCESS {
-			return 0, rc
+			return "", rc
 		}
-		return uJ, nil
+		return strings.ReplaceAll(string(buf[:]), "\000", ""), nil
 	}
-	f = resolved[symbolNvmlDeviceGetPowerUsage]
 	nvmlDeviceGetPowerUsage = func(device uintptr) (uint32, error) {
 		var mW uint32
-		rc, _, _ := f.Call(device, uintptr(unsafe.Pointer(&mW)))
+		rc, _, _ := resolved[symbolNvmlDeviceGetPowerUsage].Call(device, uintptr(unsafe.Pointer(&mW)))
 		if rc := nvmlError(rc); rc != NVML_SUCCESS {
 			return 0, rc
 		}
 		return mW, nil
 	}
-	f = resolved[symbolNvmlDeviceGetArchitecture]
-	nvmlDeviceGetArchitecture = func(device uintptr) (nvmlDeviceArchitecture, error) {
-		var arch nvmlDeviceArchitecture
-		rc, _, _ := f.Call(device, uintptr(unsafe.Pointer(&arch)))
-		if rc := nvmlError(rc); rc != NVML_SUCCESS {
-			return 0, rc
+	// Optional symbols
+	if f, ok := resolved[symbolNvmlDeviceGetArchitecture]; ok {
+		nvmlDeviceGetArchitecture = func(device uintptr) (nvmlDeviceArchitecture, error) {
+			var arch nvmlDeviceArchitecture
+			rc, _, _ := f.Call(device, uintptr(unsafe.Pointer(&arch)))
+			if rc := nvmlError(rc); rc != NVML_SUCCESS {
+				return 0, rc
+			}
+			return arch, nil
 		}
-		return arch, nil
+	}
+	if f, ok := resolved[symbolNvmlDeviceGetTotalEnergyConsumption]; ok {
+		nvmlDeviceGetTotalEnergyConsumption = func(device uintptr) (uint64, error) {
+			var uJ uint64
+			rc, _, _ := f.Call(device, uintptr(unsafe.Pointer(&uJ)))
+			if rc := nvmlError(rc); rc != NVML_SUCCESS {
+				return 0, rc
+			}
+			return uJ, nil
+		}
 	}
 	return nil
 }
