@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"git.sr.ht/~whereswaldon/energy/hwmon"
+	"git.sr.ht/~whereswaldon/energy/nvml"
 	_ "git.sr.ht/~whereswaldon/energy/nvml"
 	"git.sr.ht/~whereswaldon/energy/rapl"
 	"git.sr.ht/~whereswaldon/energy/sensors"
@@ -39,12 +40,19 @@ as root.
 	if err != nil {
 		log.Fatal(err)
 	}
-	sensorList := make([]sensors.Sensor, 0, len(raplWatches)+len(relevantSubfeatures))
+	gpuSensors, err := nvml.FindGPUSensors()
+	if err != nil {
+		log.Printf("failed loading NVIDIA GPU sensors: %v", err)
+	}
+	sensorList := make([]sensors.Sensor, 0, len(raplWatches)+len(relevantSubfeatures)+len(gpuSensors))
 	for _, w := range raplWatches {
 		sensorList = append(sensorList, w)
 	}
 	for _, s := range relevantSubfeatures {
 		sensorList = append(sensorList, s)
+	}
+	for _, g := range gpuSensors {
+		sensorList = append(sensorList, g)
 	}
 	fmt.Printf("sample start (ns), sample end (ns), ")
 	for _, s := range sensorList {
