@@ -4,15 +4,10 @@ package nvml
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
-)
-
-const (
-	nvmlSuccess uintptr = 0
 )
 
 func findNVMLDLL() (*windows.LazyDLL, error) {
@@ -20,97 +15,110 @@ func findNVMLDLL() (*windows.LazyDLL, error) {
 		os.ExpandEnv("${ProgramW6432}\\NVIDIA Corporation\\NVSMI\\nvml.dll"),
 		"nvml.dll",
 	} {
-		log.Printf("Trying to load %s", path)
 		tryNVML := windows.NewLazySystemDLL(path)
 		if err := tryNVML.Load(); err == nil {
-			log.Printf("Loaded %s", path)
 			return tryNVML, nil
 		}
 	}
 	return nil, fmt.Errorf("failed to find nvml.dll")
 }
 
-func init() {
+func platformInit() error {
 	nvml, err := findNVMLDLL()
 	if err != nil {
-		log.Printf("%v", err)
-		return
+		return err
 	}
 
-	initNVML := nvml.NewProc("nvmlInit_v2")
-	countDevices := nvml.NewProc("nvmlDeviceGetCount_v2")
-	getDeviceHandleByIndex := nvml.NewProc("nvmlDeviceGetHandleByIndex_v2")
-	getEnergy := nvml.NewProc("nvmlDeviceGetTotalEnergyConsumption")
-	getPower := nvml.NewProc("nvmlDeviceGetPowerUsage")
-	getArchitecture := nvml.NewProc("nvmlDeviceGetArchitecture")
-	getNVMLVersion := nvml.NewProc("nvmlSystemGetNVMLVersion")
-
-	var version [16]byte
-	r1, _, err := getNVMLVersion.Call(uintptr(unsafe.Pointer(&version)), 16)
-	if r1 != nvmlSuccess {
-		log.Printf("failed to get NVML version: %v", err)
-		return
+	resolved := map[string]*windows.LazyProc{}
+	requiredSymbols := []string{
+		symbolNvmlInit_v2,
+		symbolNvmlSystemGetNVMLVersion,
+		symbolNvmlDeviceGetCount_v2,
+		symbolNvmlDeviceGetHandleByIndex_v2,
+		symbolNvmlDeviceGetTotalEnergyConsumption,
+		symbolNvmlDeviceGetPowerUsage,
+		symbolNvmlDeviceGetArchitecture,
 	}
-	log.Printf("NVML version: %s", string(version[:]))
+	optionalSymbols := []string{}
 
-	useEnergy := false
-
-	err = getEnergy.Find()
-	if err != nil {
-		log.Printf("energy monitoring unavailable")
-	} else {
-		useEnergy = true
-	}
-	err = getPower.Find()
-	if err != nil {
-		log.Printf("power monitoring unavailable")
-		if !useEnergy {
-			log.Printf("neither energy nor power monitoring available, giving up")
-			return
+	for _, symbol := range requiredSymbols {
+		lazySym := nvml.NewProc(symbol)
+		if err := lazySym.Find(); err != nil {
+			return fmt.Errorf("failed resolving required symbol %q: %w", symbol, err)
 		}
+		resolved[symbol] = lazySym
 	}
-	r1, _, err = initNVML.Call()
-	if r1 != nvmlSuccess {
-		log.Printf("failed initializing: %v", err)
-		return
+	for _, symbol := range optionalSymbols {
+		lazySym := nvml.NewProc(symbol)
+		if err := lazySym.Find(); err != nil {
+			continue
+		}
+		resolved[symbol] = lazySym
 	}
-	var deviceCount uint64
-	r1, _, err = countDevices.Call(uintptr(unsafe.Pointer(&deviceCount)))
-	if r1 != nvmlSuccess {
-		log.Printf("failed counting devices: %v", err)
-		return
+
+	// Build wrappers for required symbols
+	f := resolved[symbolNvmlInit_v2]
+	nvmlInit = func() error {
+		rc, _, _ := f.Call()
+		if rc := nvmlError(rc); rc != NVML_SUCCESS {
+			return rc
+		}
+		return nil
 	}
-	log.Printf("found %d devices", deviceCount)
-	for i := uint64(0); i < deviceCount; i++ {
+	f = resolved[symbolNvmlSystemGetNVMLVersion]
+	nvmlSystemGetNVMLVersion = func() (string, error) {
+		var version [16]byte
+		rc, _, _ := f.Call(uintptr(unsafe.Pointer(&version)), uintptr(len(version)))
+		if rc := nvmlError(rc); rc != NVML_SUCCESS {
+			return "", rc
+		}
+		return string(version[:]), nil
+	}
+	f = resolved[symbolNvmlDeviceGetCount_v2]
+	nvmlDeviceGetCount = func() (uint64, error) {
+		var count uint64
+		rc, _, _ := f.Call(uintptr(unsafe.Pointer(&count)))
+		if rc := nvmlError(rc); rc != NVML_SUCCESS {
+			return 0, rc
+		}
+		return count, nil
+
+	}
+	f = resolved[symbolNvmlDeviceGetHandleByIndex_v2]
+	nvmlDeviceGetHandleByIndex = func(i uint64) (uintptr, error) {
 		var device uintptr
-		r1, _, err = getDeviceHandleByIndex.Call(uintptr(i), uintptr(unsafe.Pointer(&device)))
-		if r1 != nvmlSuccess {
-			log.Printf("failed counting devices: %v", err)
-			return
+		rc, _, _ := f.Call(uintptr(i), uintptr(unsafe.Pointer(&device)))
+		if rc := nvmlError(rc); rc != NVML_SUCCESS {
+			return 0, rc
 		}
-		log.Printf("Loaded device %v", device)
-		var arch uint32
-		r1, _, err = getArchitecture.Call(device, uintptr(unsafe.Pointer(&arch)))
-		if r1 != nvmlSuccess {
-			log.Printf("failed getting device architecture: %v", err)
-			return
-		}
-		log.Printf("Device architecture: %v", arch)
-		if useEnergy {
-			var uJ uint64
-			r1, _, err = getEnergy.Call(device, uintptr(unsafe.Pointer(&uJ)))
-			if r1 != nvmlSuccess {
-				log.Printf("failed reading energy: %v", err)
-				return
-			}
-			log.Printf("Read %d uJ", uJ)
-		} else {
-			var mW uint32
-			r1, _, err = getPower.Call(device, uintptr(unsafe.Pointer(&mW)))
-			if r1 != nvmlSuccess {
-				log.Printf("failed reading power: %v", err)
-			}
-			log.Printf("Read %d mW", mW)
-		}
+		return device, nil
 	}
+	f = resolved[symbolNvmlDeviceGetTotalEnergyConsumption]
+	nvmlDeviceGetTotalEnergyConsumption = func(device uintptr) (uint64, error) {
+		var uJ uint64
+		rc, _, _ := f.Call(device, uintptr(unsafe.Pointer(&uJ)))
+		if rc := nvmlError(rc); rc != NVML_SUCCESS {
+			return 0, rc
+		}
+		return uJ, nil
+	}
+	f = resolved[symbolNvmlDeviceGetPowerUsage]
+	nvmlDeviceGetPowerUsage = func(device uintptr) (uint32, error) {
+		var mW uint32
+		rc, _, _ := f.Call(device, uintptr(unsafe.Pointer(&mW)))
+		if rc := nvmlError(rc); rc != NVML_SUCCESS {
+			return 0, rc
+		}
+		return mW, nil
+	}
+	f = resolved[symbolNvmlDeviceGetArchitecture]
+	nvmlDeviceGetArchitecture = func(device uintptr) (nvmlDeviceArchitecture, error) {
+		var arch nvmlDeviceArchitecture
+		rc, _, _ := f.Call(device, uintptr(unsafe.Pointer(&arch)))
+		if rc := nvmlError(rc); rc != NVML_SUCCESS {
+			return 0, rc
+		}
+		return arch, nil
+	}
+	return nil
 }
