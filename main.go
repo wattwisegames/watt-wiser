@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"encoding/csv"
+	"errors"
 	"flag"
 	"fmt"
 	"image"
@@ -33,6 +35,7 @@ import (
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 	"gioui.org/x/outlay"
+	"github.com/fsnotify/fsnotify"
 	"golang.org/x/exp/constraints"
 )
 
@@ -72,6 +75,10 @@ Flags:
 	}
 	go func() {
 		var source io.Reader = os.Stdin
+		watcher, err := fsnotify.NewWatcher()
+		if err != nil {
+			log.Fatalf("failed building file watcher: %v", err)
+		}
 		if flag.NArg() > 0 {
 			f, err := os.Open(flag.Arg(0))
 			if err != nil {
@@ -79,8 +86,11 @@ Flags:
 			}
 			defer f.Close()
 			source = f
+			watcher.Add(f.Name())
 		}
-		csvReader := csv.NewReader(source)
+		bufRead := NewLineReader(source)
+
+		csvReader := csv.NewReader(bufRead)
 		csvReader.TrimLeadingSpace = true
 		headings, err := csvReader.Read()
 		if err != nil {
@@ -116,9 +126,17 @@ Flags:
 		}()
 
 		// Continously parse the CSV data and send it on the channel.
+	readLoop:
 		for {
 			rec, err := csvReader.Read()
 			if err != nil {
+				if errors.Is(err, io.EOF) {
+					for ev := range watcher.Events {
+						if ev.Op == fsnotify.Write {
+							continue readLoop
+						}
+					}
+				}
 				log.Printf("could not read sensor data: %v", err)
 				return
 			}
@@ -150,6 +168,37 @@ Flags:
 	}()
 
 	app.Main()
+}
+
+// lineReader is a specialized reader that ensures only entire newline-delimited lines are
+// read at a time. This is useful when attempting to parse a file that is being actively
+// written to as a CSV, as you don't actually attempt to parse any partial lines.
+type lineReader struct {
+	r       *bufio.Reader
+	partial []byte
+}
+
+var _ io.Reader = (*lineReader)(nil)
+
+func NewLineReader(r io.Reader) *lineReader {
+	return &lineReader{
+		r: bufio.NewReader(r),
+	}
+}
+
+func (l *lineReader) Read(b []byte) (int, error) {
+	data, err := l.r.ReadBytes(byte('\n'))
+	if err != nil {
+		l.partial = append(l.partial, data...)
+		return 0, io.EOF
+	}
+	var n int
+	if len(l.partial) > 0 {
+		n = copy(b, l.partial)
+		l.partial = l.partial[:copy(l.partial, l.partial[n:])]
+		b = b[n:]
+	}
+	return n + copy(b, data), nil
 }
 
 type (
