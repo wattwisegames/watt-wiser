@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime"
 	"time"
 
 	"git.sr.ht/~whereswaldon/energy/hwmon"
@@ -14,9 +15,8 @@ import (
 	"git.sr.ht/~whereswaldon/energy/sensors"
 )
 
-func main() {
-	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), `%[1]s: collect csv energy trace file from sensors
+func linuxUsage() {
+	fmt.Fprintf(flag.CommandLine.Output(), `%[1]s: collect csv energy trace file from sensors
 Usage:
 
  sudo %[1]s > file
@@ -29,7 +29,40 @@ Sadly, accessing RAPL requires root permissions, which is why this binary typica
 as root.
 
 `, os.Args[0])
-		flag.PrintDefaults()
+	flag.PrintDefaults()
+}
+
+func windowsUsage() {
+	fmt.Fprintf(flag.CommandLine.Output(), `%[1]s: collect csv energy trace file from sensors
+Usage:
+
+ %[1]s > file
+
+OR
+
+ %[1]s | watt-wiser
+
+`, os.Args[0])
+	flag.PrintDefaults()
+}
+
+func unsupportedUsage() {
+	fmt.Fprintf(flag.CommandLine.Output(), `%[1]s: collect csv energy trace file from sensors
+
+This platform is unsupported; no sensor data is available.
+
+`, os.Args[0])
+	flag.PrintDefaults()
+}
+
+func main() {
+	switch runtime.GOOS {
+	case "linux":
+		flag.Usage = linuxUsage
+	case "windows":
+		flag.Usage = windowsUsage
+	default:
+		flag.Usage = unsupportedUsage
 	}
 	dur := flag.Duration("sample-interval", 100*time.Millisecond, "Interval between reading new samples from sensors")
 	flag.Parse()
