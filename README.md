@@ -12,9 +12,11 @@ Usable for simple energy estimation. The GUI is functional on Linux, macOS, and 
 | --- | --- | --- | --- | --- | --- |
 | Linux | ✅ (RAPL) | ✅ (RAPL) | N/A | ✅ (NVML) | ✅ (HWMON) |
 | Windows | ❌| ❌| N/A | ✅ (NVML) | ❌|
-| macOS | ❌| ❌| ❌ | ❌ | ❌|
+| macOS | ❌| N/A | ❌ | ❌ | ❌|
 
 Interested users on platforms without sensor support can still try the GUI out on the included example trace file.
+
+To be clear, we'd like to check every box we can, but it can be difficult to figure out how to access relevant sensors on various platforms. If you think you can help us figure out a missing platform, please reach out!
 
 # GUI
 
