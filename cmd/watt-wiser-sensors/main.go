@@ -31,6 +31,7 @@ as root.
 `, os.Args[0])
 		flag.PrintDefaults()
 	}
+	dur := flag.Duration("sample-interval", 100*time.Millisecond, "Interval between reading new samples from sensors")
 	flag.Parse()
 	raplWatches, err := rapl.FindRAPL()
 	if err != nil {
@@ -72,7 +73,7 @@ as root.
 			return
 		}
 	}
-	sampleRate := time.Millisecond * 100
+	sampleRate := *dur
 	ticker := time.NewTicker(sampleRate)
 	defer ticker.Stop()
 	for {
