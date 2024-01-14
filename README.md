@@ -8,8 +8,8 @@ A software energy consumption estimation tool built as part of the [Watt-Wise Ga
 
 Usable for simple energy estimation. The GUI is functional on Linux, macOS, and Windows, and the sensors support is captured in the following table.
 
-| --- | --- | --- | --- | --- |
 | OS | Intel CPU | AMD CPU | Apple CPU | NVIDIA GPU | AMD GPU |
+| --- | --- | --- | --- | --- | --- |
 | Linux | ✅ (RAPL) | ✅ (RAPL) | N/A | ✅ (NVML) | ✅ (HWMON) |
 | Windows | ❌| ❌| N/A | ✅ (NVML) | ❌|
 | macOS | ❌| ❌| ❌ | ❌ | ❌|
