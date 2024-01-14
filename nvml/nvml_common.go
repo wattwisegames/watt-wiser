@@ -18,7 +18,7 @@ var (
 	nvmlSystemGetNVMLVersion            func() (string, error)
 	nvmlDeviceGetCount                  func() (uint64, error)
 	nvmlDeviceGetHandleByIndex          func(i uint64) (uintptr, error)
-	nvmlDeviceGetName func(device uintptr) (string, error)
+	nvmlDeviceGetName                   func(device uintptr) (string, error)
 	nvmlDeviceGetArchitecture           func(device uintptr) (nvmlDeviceArchitecture, error)
 	nvmlDeviceGetTotalEnergyConsumption func(device uintptr) (uint64, error)
 	nvmlDeviceGetPowerUsage             func(device uintptr) (uint32, error)
@@ -96,7 +96,7 @@ type sensor struct {
 	name       string
 	unit       sensors.Unit
 	device     uintptr
-	lastReadUJ uint64
+	lastReadMJ uint64
 }
 
 func (s *sensor) Name() string {
@@ -113,14 +113,14 @@ func (s *sensor) Read() (float64, error) {
 		if err != nil {
 			return 0, err
 		}
-		return float64(mW) / 1000, nil
+		return float64(mW) / 1_000, nil
 	}
-	uJ, err := nvmlDeviceGetTotalEnergyConsumption(s.device)
+	mJ, err := nvmlDeviceGetTotalEnergyConsumption(s.device)
 	if err != nil {
 		return 0, err
 	}
-	uJ, s.lastReadUJ = uJ-s.lastReadUJ, uJ
-	return float64(uJ) / 1_000_000, nil
+	mJ, s.lastReadMJ = mJ-s.lastReadMJ, mJ
+	return float64(mJ) / 1_000, nil
 }
 
 var _ sensors.Sensor = (*sensor)(nil)
@@ -130,7 +130,7 @@ const (
 	symbolNvmlSystemGetNVMLVersion            string = "nvmlSystemGetNVMLVersion"
 	symbolNvmlDeviceGetCount_v2               string = "nvmlDeviceGetCount_v2"
 	symbolNvmlDeviceGetHandleByIndex_v2       string = "nvmlDeviceGetHandleByIndex_v2"
-	symbolNvmlDeviceGetName string = "nvmlDeviceGetName"
+	symbolNvmlDeviceGetName                   string = "nvmlDeviceGetName"
 	symbolNvmlDeviceGetTotalEnergyConsumption string = "nvmlDeviceGetTotalEnergyConsumption"
 	symbolNvmlDeviceGetPowerUsage             string = "nvmlDeviceGetPowerUsage"
 	symbolNvmlDeviceGetArchitecture           string = "nvmlDeviceGetArchitecture"
