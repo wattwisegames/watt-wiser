@@ -3,8 +3,10 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
+	"os/signal"
 	"runtime"
 	"time"
 
@@ -65,6 +67,7 @@ func main() {
 		flag.Usage = unsupportedUsage
 	}
 	dur := flag.Duration("sample-interval", 100*time.Millisecond, "Interval between reading new samples from sensors")
+	outputName := flag.String("output", "-", "Output file for CSV sensor data")
 	flag.Parse()
 	raplWatches, err := rapl.FindRAPL()
 	if err != nil {
@@ -78,6 +81,17 @@ func main() {
 	if err != nil {
 		log.Printf("failed loading NVIDIA GPU sensors: %v", err)
 	}
+
+	var output io.WriteCloser
+	if *outputName == "-" {
+		output = os.Stdout
+	} else {
+		f, err := os.Create(*outputName)
+		if err != nil {
+			log.Fatalf("failed opening output file %q: %v", *outputName, err)
+		}
+		output = f
+	}
 	sensorList := make([]sensors.Sensor, 0, len(raplWatches)+len(relevantSubfeatures)+len(gpuSensors))
 	for _, w := range raplWatches {
 		sensorList = append(sensorList, w)
@@ -88,14 +102,15 @@ func main() {
 	for _, g := range gpuSensors {
 		sensorList = append(sensorList, g)
 	}
-	fmt.Printf("sample start (ns), sample end (ns), ")
+
+	fmt.Fprintf(output, "sample start (ns), sample end (ns), ")
 	for _, s := range sensorList {
-		fmt.Printf("%s (%s), ", s.Name(), s.Unit())
+		fmt.Fprintf(output, "%s (%s), ", s.Name(), s.Unit())
 		if s.Unit() == sensors.Watts {
-			fmt.Printf("integrated %s (%s),", s.Name(), sensors.Joules)
+			fmt.Fprintf(output, "integrated %s (%s),", s.Name(), sensors.Joules)
 		}
 	}
-	fmt.Println()
+	fmt.Fprintln(output)
 	samples := make([]float64, len(sensorList))
 	lastReadTime := time.Now()
 	// Pre-read every sensor once to ensure that incremental sensors emit coherent first values.
@@ -108,9 +123,17 @@ func main() {
 	}
 	sampleRate := *dur
 	ticker := time.NewTicker(sampleRate)
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt)
 	defer ticker.Stop()
 	for {
 		select {
+		case <-sigChan:
+			// We've gotten an interrupt; shut down.
+			if err := output.Close(); err != nil {
+				log.Printf("failed closing output: %v", err)
+			}
+			return
 		case sampleEndTime := <-ticker.C:
 			for chipIdx, chip := range sensorList {
 				v, err := chip.Read()
@@ -123,16 +146,16 @@ func main() {
 			readFinishedAt := time.Now()
 			if readDuration := readFinishedAt.Sub(lastReadTime); readDuration < sampleRate*2 {
 				// This sample was not interrupted mid-read, so we're good.
-				fmt.Printf("%d, %d, ", lastReadTime.UnixNano(), sampleEndTime.UnixNano())
+				fmt.Fprintf(output, "%d, %d, ", lastReadTime.UnixNano(), sampleEndTime.UnixNano())
 				sampleInterval := sampleEndTime.Sub(lastReadTime)
 				for chipIdx, chip := range sensorList {
 					v := samples[chipIdx]
-					fmt.Printf("%f, ", v)
+					fmt.Fprintf(output, "%f, ", v)
 					if chip.Unit() == sensors.Watts {
-						fmt.Printf("%f, ", v*sampleInterval.Seconds())
+						fmt.Fprintf(output, "%f, ", v*sampleInterval.Seconds())
 					}
 				}
-				fmt.Println()
+				fmt.Fprintln(output)
 			} else {
 				log.Printf("dropping sample with read duration %d >= sample rate %d", readDuration, sampleRate)
 			}
