@@ -6,7 +6,15 @@ A software energy consumption estimation tool built as part of the [Watt-Wise Ga
 
 ## Status
 
-Unstable and experimental, but usable for simple visualization. The GUI is functional on Linux, macOS, and Windows, but the sensors executable that actually collects data currently only supports Linux. Interested users of other OSes can still try the GUI out on the included example trace file.
+Usable for simple energy estimation. The GUI is functional on Linux, macOS, and Windows, and the sensors support is captured in the following table.
+
+| --- | --- | --- | --- | --- |
+| OS | Intel CPU | AMD CPU | Apple CPU | NVIDIA GPU | AMD GPU |
+| Linux | ✅ (RAPL) | ✅ (RAPL) | N/A | ✅ (NVML) | ✅ (HWMON) |
+| Windows | ❌| ❌| N/A | ✅ (NVML) | ❌|
+| macOS | ❌| ❌| ❌ | ❌ | ❌|
+
+Interested users on platforms without sensor support can still try the GUI out on the included example trace file.
 
 # GUI
 
