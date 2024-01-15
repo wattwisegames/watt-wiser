@@ -5,14 +5,18 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"image"
 	"io"
 	"log"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime/pprof"
 	"runtime/trace"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"gioui.org/app"
 	"gioui.org/font/gofont"
@@ -20,6 +24,7 @@ import (
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/text"
+	"gioui.org/widget"
 	"gioui.org/widget/material"
 	"github.com/fsnotify/fsnotify"
 )
@@ -90,7 +95,7 @@ Flags:
 		samplesChan := make(chan inputData, 1024)
 		w := app.NewWindow(app.Title("Watt Wiser"))
 		go func() {
-			err := loop(w, samplesChan)
+			err := loop(w, watcher, samplesChan)
 			if traceInto != "" {
 				trace.Stop()
 				f.Close()
@@ -179,15 +184,55 @@ readLoop:
 	}
 }
 
+func launchSensors() (string, *exec.Cmd, error) {
+	const sensorExeName = "watt-wiser-sensors"
+	traceFile := sensorExeName + "-" + strconv.FormatInt(time.Now().Unix(), 10) + ".csv"
+	execPath, err := os.Executable()
+	if err == nil {
+		sensorExe := filepath.Join(filepath.Dir(execPath), sensorExeName)
+		if _, err := os.Stat(sensorExe); err == nil {
+			cmd := exec.Command(sensorExe, "-output", traceFile)
+			cmd.Stderr = os.Stderr
+			cmd.Stdout = os.Stdout
+			if err := cmd.Start(); err != nil {
+				return "", nil, fmt.Errorf("failed launching %q: %w", sensorExe, err)
+			} else {
+				return traceFile, cmd, nil
+			}
+		}
+	}
+
+	sensorExe, err := exec.LookPath(sensorExeName)
+	if err != nil {
+		return "", nil, fmt.Errorf("unable to locate %q in $PATH: %w", sensorExeName, err)
+	}
+
+	cmd := exec.Command(sensorExe, "-output", traceFile)
+	cmd.Stderr = os.Stderr
+	cmd.Stdout = os.Stdout
+
+	if err := cmd.Start(); err != nil {
+		return "", nil, fmt.Errorf("failed launching %q: %w", sensorExe, err)
+	}
+
+	return traceFile, cmd, nil
+}
+
 type (
 	C = layout.Context
 	D = layout.Dimensions
 )
 
-func loop(w *app.Window, samples chan inputData) error {
+func loop(w *app.Window, watcher *fsnotify.Watcher, samples chan inputData) error {
 	var dataMutex sync.Mutex
-	var data ChartData
+	var chart ChartData
+	var launchBtn widget.Clickable
+	var sensorsErr string
 	var ops op.Ops
+	onClose := func() {}
+	defer func() {
+		onClose()
+	}()
 	th := material.NewTheme()
 	th.Shaper = text.NewShaper(text.WithCollection(gofont.Collection()), text.NoSystemFonts())
 	go func() {
@@ -197,9 +242,9 @@ func loop(w *app.Window, samples chan inputData) error {
 				defer dataMutex.Unlock()
 				switch sample.Kind {
 				case kindHeadings:
-					data.Headings = sample.Headings
+					chart.Headings = sample.Headings
 				case kindSample:
-					data.Insert(sample.Sample)
+					chart.Insert(sample.Sample)
 				}
 			}()
 			w.Invalidate()
@@ -211,15 +256,64 @@ func loop(w *app.Window, samples chan inputData) error {
 			return ev.Err
 		case system.FrameEvent:
 			gtx := layout.NewContext(&ops, ev)
-			if data.Initialized() {
+			if chart.Initialized() {
 				func() {
 					dataMutex.Lock()
 					defer dataMutex.Unlock()
-					data.Layout(gtx, th)
+					chart.Layout(gtx, th)
 				}()
 			} else {
+				if launchBtn.Clicked(gtx) {
+					traceFile, cmd, err := launchSensors()
+					if err != nil {
+						sensorsErr = err.Error()
+					} else {
+						onClose = func() {
+							cmd.Process.Kill()
+						}
+						go func() {
+							ticker := time.NewTicker(time.Millisecond * 10)
+							count := 0
+							var f *os.File
+							var err error
+							for range ticker.C {
+								count++
+								f, err = os.Open(traceFile)
+								if err == nil {
+									break
+								}
+								if count > 1000 {
+									break
+								}
+							}
+							if err != nil {
+								log.Printf("failed opening data file: %v", err)
+								return
+							}
+							watcher.Add(traceFile)
+							readSource(f, watcher, samples)
+						}()
+					}
+				}
 				l := material.Body1(th, "No data yet.")
-				layout.Center.Layout(gtx, l.Layout)
+				layout.Flex{
+					Axis:      layout.Vertical,
+					Alignment: layout.Middle,
+					Spacing:   layout.SpaceAround,
+				}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						gtx.Constraints.Min = image.Point{}
+						return l.Layout(gtx)
+					}),
+					layout.Rigid(func(gtx C) D {
+						gtx.Constraints.Min = image.Point{}
+						return material.Button(th, &launchBtn, "Launch Sensors").Layout(gtx)
+					}),
+					layout.Rigid(func(gtx C) D {
+						gtx.Constraints.Min = image.Point{}
+						return material.Body2(th, sensorsErr).Layout(gtx)
+					}),
+				)
 			}
 			ev.Frame(gtx.Ops)
 		}
