@@ -190,6 +190,7 @@ func launchSensors() (string, *exec.Cmd, error) {
 	execPath, err := os.Executable()
 	if err == nil {
 		sensorExe := filepath.Join(filepath.Dir(execPath), sensorExeName)
+		log.Printf("Looking for %q", sensorExe)
 		if _, err := os.Stat(sensorExe); err == nil {
 			cmd := exec.Command(sensorExe, "-output", traceFile)
 			cmd.Stderr = os.Stderr
@@ -202,6 +203,7 @@ func launchSensors() (string, *exec.Cmd, error) {
 		}
 	}
 
+	log.Printf("Searching path for sensors")
 	sensorExe, err := exec.LookPath(sensorExeName)
 	if err != nil {
 		return "", nil, fmt.Errorf("unable to locate %q in $PATH: %w", sensorExeName, err)
