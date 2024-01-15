@@ -191,15 +191,11 @@ func launchSensors() (string, *exec.Cmd, error) {
 	if err == nil {
 		sensorExe := filepath.Join(filepath.Dir(execPath), sensorExeName)
 		log.Printf("Looking for %q", sensorExe)
-		if _, err := os.Stat(sensorExe); err == nil {
-			cmd := exec.Command(sensorExe, "-output", traceFile)
-			cmd.Stderr = os.Stderr
-			cmd.Stdout = os.Stdout
-			if err := cmd.Start(); err != nil {
-				return "", nil, fmt.Errorf("failed launching %q: %w", sensorExe, err)
-			} else {
-				return traceFile, cmd, nil
-			}
+		cmd := exec.Command(sensorExe, "-output", traceFile)
+		cmd.Stderr = os.Stderr
+		cmd.Stdout = os.Stdout
+		if err := cmd.Start(); err == nil {
+			return traceFile, cmd, nil
 		}
 	}
 
