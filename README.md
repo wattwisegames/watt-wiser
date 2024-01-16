@@ -80,6 +80,12 @@ You can also directly pipe sensor data to the GUI:
 sudo ./watt-wiser-sensors | ./watt-wiser
 ```
 
+### Installation from distro repositories
+
+- Arch Linux (AUR)
+  - [`watt-wiser-sensors-git`](https://aur.archlinux.org/packages/watt-wiser-sensors-git) for collecting statistics
+  - [`watt-wiser-git`](https://aur.archlinux.org/packages/watt-wiser-git) for graphing statistics collected with `watt-wiser-sensors`, depends on `watt-wiser-sensors`
+
 ## Windows Setup
 
 You'll need the latest version of [Go](https://golang.org/dl) and an installation of [`git`](https://git-scm.com/download/win).
