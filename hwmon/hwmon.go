@@ -14,7 +14,7 @@ import (
 	"strings"
 	"unsafe"
 
-	"git.sr.ht/~whereswaldon/energy/sensors"
+	"git.sr.ht/~whereswaldon/watt-wiser/sensors"
 )
 
 type SyntheticPower struct {
