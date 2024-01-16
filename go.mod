@@ -1,4 +1,4 @@
-module git.sr.ht/~whereswaldon/energy
+module git.sr.ht/~whereswaldon/watt-wiser
 
 go 1.21.0
 

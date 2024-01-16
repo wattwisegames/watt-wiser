@@ -5,7 +5,7 @@ import (
 	"log"
 	"sync"
 
-	"git.sr.ht/~whereswaldon/energy/sensors"
+	"git.sr.ht/~whereswaldon/watt-wiser/sensors"
 )
 
 var (

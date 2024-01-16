@@ -1,7 +1,7 @@
 //go:build !linux
 package rapl
 
-import "git.sr.ht/~whereswaldon/energy/sensors"
+import "git.sr.ht/~whereswaldon/watt-wiser/sensors"
 
 func FindRAPL() ([]sensors.Sensor, error) {
 	return nil, nil

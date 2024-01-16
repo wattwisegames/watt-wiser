@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"git.sr.ht/~whereswaldon/energy/sensors"
+	"git.sr.ht/~whereswaldon/watt-wiser/sensors"
 )
 
 type watchFile struct {

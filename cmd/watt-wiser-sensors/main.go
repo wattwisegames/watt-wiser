@@ -10,11 +10,11 @@ import (
 	"runtime"
 	"time"
 
-	"git.sr.ht/~whereswaldon/energy/hwmon"
-	"git.sr.ht/~whereswaldon/energy/nvml"
-	_ "git.sr.ht/~whereswaldon/energy/nvml"
-	"git.sr.ht/~whereswaldon/energy/rapl"
-	"git.sr.ht/~whereswaldon/energy/sensors"
+	"git.sr.ht/~whereswaldon/watt-wiser/hwmon"
+	"git.sr.ht/~whereswaldon/watt-wiser/nvml"
+	_ "git.sr.ht/~whereswaldon/watt-wiser/nvml"
+	"git.sr.ht/~whereswaldon/watt-wiser/rapl"
+	"git.sr.ht/~whereswaldon/watt-wiser/sensors"
 )
 
 func linuxUsage() {

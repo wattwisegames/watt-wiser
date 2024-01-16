@@ -2,7 +2,7 @@
 
 package hwmon
 
-import "git.sr.ht/~whereswaldon/energy/sensors"
+import "git.sr.ht/~whereswaldon/watt-wiser/sensors"
 
 func FindEnergySensors() ([]sensors.Sensor, error) {
 	return nil, nil
