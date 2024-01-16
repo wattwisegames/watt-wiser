@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"runtime/pprof"
 	"runtime/trace"
 	"strconv"
@@ -190,12 +191,17 @@ func launchSensors() (string, *exec.Cmd, error) {
 	execPath, err := os.Executable()
 	if err == nil {
 		sensorExe := filepath.Join(filepath.Dir(execPath), sensorExeName)
+		if runtime.GOOS=="windows" {
+			sensorExe+=".exe"
+		}
 		log.Printf("Looking for %q", sensorExe)
 		cmd := exec.Command(sensorExe, "-output", traceFile)
 		cmd.Stderr = os.Stderr
 		cmd.Stdout = os.Stdout
 		if err := cmd.Start(); err == nil {
 			return traceFile, cmd, nil
+		} else {
+			log.Printf("failed running %q: %v", sensorExe, err)
 		}
 	}
 
