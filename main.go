@@ -17,7 +17,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"gioui.org/app"
 	"gioui.org/font/gofont"
@@ -185,41 +184,42 @@ readLoop:
 	}
 }
 
-func launchSensors() (string, *exec.Cmd, error) {
+func runSensorsWithName(exeName string) (*exec.Cmd, io.ReadCloser, error) {
+	cmd := exec.Command(exeName)
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed acquiring stdout pipe: %w", err)
+	}
+	return cmd, out, cmd.Start()
+}
+
+func launchSensors() (*exec.Cmd, io.ReadCloser, error) {
 	const sensorExeName = "watt-wiser-sensors"
-	traceFile := sensorExeName + "-" + strconv.FormatInt(time.Now().Unix(), 10) + ".csv"
 	execPath, err := os.Executable()
 	if err == nil {
 		sensorExe := filepath.Join(filepath.Dir(execPath), sensorExeName)
-		if runtime.GOOS=="windows" {
-			sensorExe+=".exe"
+		if runtime.GOOS == "windows" {
+			sensorExe += ".exe"
 		}
 		log.Printf("Looking for %q", sensorExe)
-		cmd := exec.Command(sensorExe, "-output", traceFile)
-		cmd.Stderr = os.Stderr
-		cmd.Stdout = os.Stdout
-		if err := cmd.Start(); err == nil {
-			return traceFile, cmd, nil
-		} else {
-			log.Printf("failed running %q: %v", sensorExe, err)
+		cmd, output, err := runSensorsWithName(sensorExe)
+		if err == nil {
+			return cmd, output, nil
 		}
 	}
 
 	log.Printf("Searching path for sensors")
 	sensorExe, err := exec.LookPath(sensorExeName)
 	if err != nil {
-		return "", nil, fmt.Errorf("unable to locate %q in $PATH: %w", sensorExeName, err)
+		return nil, nil, fmt.Errorf("unable to locate %q in $PATH: %w", sensorExeName, err)
 	}
 
-	cmd := exec.Command(sensorExe, "-output", traceFile)
-	cmd.Stderr = os.Stderr
-	cmd.Stdout = os.Stdout
-
-	if err := cmd.Start(); err != nil {
-		return "", nil, fmt.Errorf("failed launching %q: %w", sensorExe, err)
+	cmd, output, err := runSensorsWithName(sensorExe)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed launching %q: %w", sensorExe, err)
 	}
 
-	return traceFile, cmd, nil
+	return cmd, output, nil
 }
 
 type (
@@ -231,6 +231,7 @@ func loop(w *app.Window, watcher *fsnotify.Watcher, samples chan inputData) erro
 	var dataMutex sync.Mutex
 	var chart ChartData
 	var launchBtn widget.Clickable
+	launched := false
 	var sensorsErr string
 	var ops op.Ops
 	onClose := func() {}
@@ -267,35 +268,17 @@ func loop(w *app.Window, watcher *fsnotify.Watcher, samples chan inputData) erro
 					chart.Layout(gtx, th)
 				}()
 			} else {
-				if launchBtn.Clicked(gtx) {
-					traceFile, cmd, err := launchSensors()
+				if !launched && launchBtn.Clicked(gtx) {
+					cmd, traceReader, err := launchSensors()
 					if err != nil {
 						sensorsErr = err.Error()
 					} else {
+						launched = true
 						onClose = func() {
 							cmd.Process.Kill()
 						}
 						go func() {
-							ticker := time.NewTicker(time.Millisecond * 10)
-							count := 0
-							var f *os.File
-							var err error
-							for range ticker.C {
-								count++
-								f, err = os.Open(traceFile)
-								if err == nil {
-									break
-								}
-								if count > 1000 {
-									break
-								}
-							}
-							if err != nil {
-								log.Printf("failed opening data file: %v", err)
-								return
-							}
-							watcher.Add(traceFile)
-							readSource(f, watcher, samples)
+							readSource(traceReader, watcher, samples)
 						}()
 					}
 				}
@@ -311,6 +294,9 @@ func loop(w *app.Window, watcher *fsnotify.Watcher, samples chan inputData) erro
 					}),
 					layout.Rigid(func(gtx C) D {
 						gtx.Constraints.Min = image.Point{}
+						if launched {
+							gtx = gtx.Disabled()
+						}
 						return material.Button(th, &launchBtn, "Launch Sensors").Layout(gtx)
 					}),
 					layout.Rigid(func(gtx C) D {
