@@ -103,6 +103,10 @@ func main() {
 		sensorList = append(sensorList, g)
 	}
 
+	if len(sensorList) < 1 {
+		log.Fatalf("No supported sensors found. Please see https://git.sr.ht/~whereswaldon/watt-wiser or https://github.com/wattwisegames/watt-wiser for supported hardware information")
+	}
+
 	fmt.Fprintf(output, "sample start (ns), sample end (ns), ")
 	for _, s := range sensorList {
 		fmt.Fprintf(output, "%s (%s), ", s.Name(), s.Unit())
