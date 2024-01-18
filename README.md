@@ -26,6 +26,7 @@ You'll need:
 - the latest version of [Go](https://golang.org/dl)
 - the [dependencies for Gio](https://gioui.org/doc/install), the GUI toolkit in use.
 - `libsensors`'s header files, which may be packaged as part of `lm-sensors`
+- `xdg-desktop-portal` and at least one implementation of it (such as `xdg-desktop-portal-gnome` or `xdg-desktop-portal-kde`) in order to open trace files with a file picker. This is a runtime dependency, not a build-time one.
 
 After installing dependences, do the following:
 
