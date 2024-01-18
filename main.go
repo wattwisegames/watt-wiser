@@ -26,6 +26,7 @@ import (
 	"gioui.org/text"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
+	"gioui.org/x/explorer"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -228,9 +229,11 @@ type (
 )
 
 func loop(w *app.Window, watcher *fsnotify.Watcher, samples chan inputData) error {
+	expl := explorer.NewExplorer(w)
 	var dataMutex sync.Mutex
 	var chart ChartData
 	var launchBtn widget.Clickable
+	var explorerBtn widget.Clickable
 	launched := false
 	var sensorsErr string
 	var ops op.Ops
@@ -256,7 +259,9 @@ func loop(w *app.Window, watcher *fsnotify.Watcher, samples chan inputData) erro
 		}
 	}()
 	for {
-		switch ev := w.NextEvent().(type) {
+		ev := w.NextEvent()
+		expl.ListenEvents(ev)
+		switch ev := ev.(type) {
 		case system.DestroyEvent:
 			return ev.Err
 		case system.FrameEvent:
@@ -282,6 +287,19 @@ func loop(w *app.Window, watcher *fsnotify.Watcher, samples chan inputData) erro
 						}()
 					}
 				}
+				if explorerBtn.Clicked(gtx) {
+					file, err := expl.ChooseFile()
+					if err != nil {
+						sensorsErr = err.Error()
+					} else {
+						if f, ok := file.(interface{ Name() string }); ok {
+							watcher.Add(f.Name())
+						}
+						go func() {
+							readSource(file, watcher, samples)
+						}()
+					}
+				}
 				l := material.Body1(th, "No data yet.")
 				layout.Flex{
 					Axis:      layout.Vertical,
@@ -298,6 +316,13 @@ func loop(w *app.Window, watcher *fsnotify.Watcher, samples chan inputData) erro
 							gtx = gtx.Disabled()
 						}
 						return material.Button(th, &launchBtn, "Launch Sensors").Layout(gtx)
+					}),
+					layout.Rigid(func(gtx C) D {
+						gtx.Constraints.Min = image.Point{}
+						if launched {
+							gtx = gtx.Disabled()
+						}
+						return material.Button(th, &explorerBtn, "Open Existing Trace").Layout(gtx)
 					}),
 					layout.Rigid(func(gtx C) D {
 						gtx.Constraints.Min = image.Point{}
