@@ -228,32 +228,121 @@ type (
 	D = layout.Dimensions
 )
 
+// UI is responsible for holding the state of and drawing the top-level UI.
+type UI struct {
+	chart       ChartData
+	launchBtn   widget.Clickable
+	explorerBtn widget.Clickable
+	launching   bool
+	sensorsErr  string
+
+	th *material.Theme
+}
+
+func NewUI(w *app.Window) *UI {
+	th := material.NewTheme()
+	th.Shaper = text.NewShaper(text.WithCollection(gofont.Collection()), text.NoSystemFonts())
+	return &UI{
+		th: th,
+	}
+}
+
+type (
+	// UIRequest represents a request made by the UI to interact with a non-UI resource.
+	UIRequest interface {
+		isUIRequest()
+	}
+	// LoadFileRequest indicates that the UI wants to load a trace file from a file picker.
+	LoadFileRequest struct{}
+	// LaunchSensorsRequest indicates that the UI wants to launch the sensors itself and
+	// consume their data.
+	LaunchSensorsRequest struct{}
+)
+
+func (LoadFileRequest) isUIRequest()      {}
+func (LaunchSensorsRequest) isUIRequest() {}
+
+// Insert adds a datapoint to the UI's visualization.
+func (ui *UI) Insert(sample inputData) {
+	switch sample.Kind {
+	case kindHeadings:
+		ui.chart.Headings = sample.Headings
+	case kindSample:
+		ui.chart.Insert(sample.Sample)
+	}
+}
+
+// Update the state of the UI and generate events. Must be called until the second parameter
+// (indicating the presence/absence of an event) returns false each frame.
+func (ui *UI) Update(gtx C) (UIRequest, bool) {
+	if !ui.launching && ui.launchBtn.Clicked(gtx) {
+		ui.launching = true
+		return LaunchSensorsRequest{}, true
+	}
+	if ui.explorerBtn.Clicked(gtx) {
+		return LoadFileRequest{}, true
+	}
+	return nil, false
+}
+
+// Layout the UI into the provided context.
+func (ui *UI) Layout(gtx C) D {
+	for {
+		_, ok := ui.Update(gtx)
+		if !ok {
+			break
+		}
+	}
+	if ui.chart.Initialized() {
+		return ui.chart.Layout(gtx, ui.th)
+	}
+	l := material.Body1(ui.th, "No data yet.")
+	return layout.Flex{
+		Axis:      layout.Vertical,
+		Alignment: layout.Middle,
+		Spacing:   layout.SpaceAround,
+	}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min = image.Point{}
+			return l.Layout(gtx)
+		}),
+		layout.Rigid(func(gtx C) D {
+			gtx.Constraints.Min = image.Point{}
+			if ui.launching {
+				gtx = gtx.Disabled()
+			}
+			return material.Button(ui.th, &ui.launchBtn, "Launch Sensors").Layout(gtx)
+		}),
+		layout.Rigid(func(gtx C) D {
+			gtx.Constraints.Min = image.Point{}
+			return material.Button(ui.th, &ui.explorerBtn, "Open Existing Trace").Layout(gtx)
+		}),
+		layout.Rigid(func(gtx C) D {
+			gtx.Constraints.Min = image.Point{}
+			return material.Body2(ui.th, ui.sensorsErr).Layout(gtx)
+		}),
+	)
+}
+
+// loop runs the top-level application event loop, connecting a UI instance to sources of data
+// and ensuring that the UI is notified of new data.
 func loop(w *app.Window, watcher *fsnotify.Watcher, samples chan inputData) error {
 	expl := explorer.NewExplorer(w)
-	var dataMutex sync.Mutex
-	var chart ChartData
-	var launchBtn widget.Clickable
-	var explorerBtn widget.Clickable
-	launched := false
-	var sensorsErr string
 	var ops op.Ops
+	var dataMutex sync.Mutex
+
 	onClose := func() {}
 	defer func() {
 		onClose()
 	}()
-	th := material.NewTheme()
-	th.Shaper = text.NewShaper(text.WithCollection(gofont.Collection()), text.NoSystemFonts())
+
+	ui := NewUI(w)
 	go func() {
 		for sample := range samples {
 			func() {
 				dataMutex.Lock()
 				defer dataMutex.Unlock()
-				switch sample.Kind {
-				case kindHeadings:
-					chart.Headings = sample.Headings
-				case kindSample:
-					chart.Insert(sample.Sample)
-				}
+				ui.Insert(sample)
 			}()
 			w.Invalidate()
 		}
@@ -266,70 +355,43 @@ func loop(w *app.Window, watcher *fsnotify.Watcher, samples chan inputData) erro
 			return ev.Err
 		case system.FrameEvent:
 			gtx := layout.NewContext(&ops, ev)
-			if chart.Initialized() {
-				func() {
-					dataMutex.Lock()
-					defer dataMutex.Unlock()
-					chart.Layout(gtx, th)
-				}()
-			} else {
-				if !launched && launchBtn.Clicked(gtx) {
-					cmd, traceReader, err := launchSensors()
-					if err != nil {
-						sensorsErr = err.Error()
-					} else {
-						launched = true
-						onClose = func() {
-							cmd.Process.Kill()
+			func() {
+				dataMutex.Lock()
+				defer dataMutex.Unlock()
+				for {
+					ev, ok := ui.Update(gtx)
+					if !ok {
+						break
+					}
+					switch ev.(type) {
+					case LoadFileRequest:
+						file, err := expl.ChooseFile()
+						if err != nil {
+							ui.sensorsErr = err.Error()
+						} else {
+							if f, ok := file.(interface{ Name() string }); ok {
+								watcher.Add(f.Name())
+							}
+							go func() {
+								readSource(file, watcher, samples)
+							}()
 						}
-						go func() {
-							readSource(traceReader, watcher, samples)
-						}()
+					case LaunchSensorsRequest:
+						cmd, traceReader, err := launchSensors()
+						if err != nil {
+							ui.sensorsErr = err.Error()
+						} else {
+							onClose = func() {
+								cmd.Process.Kill()
+							}
+							go func() {
+								readSource(traceReader, watcher, samples)
+							}()
+						}
 					}
 				}
-				if explorerBtn.Clicked(gtx) {
-					file, err := expl.ChooseFile()
-					if err != nil {
-						sensorsErr = err.Error()
-					} else {
-						if f, ok := file.(interface{ Name() string }); ok {
-							watcher.Add(f.Name())
-						}
-						go func() {
-							readSource(file, watcher, samples)
-						}()
-					}
-				}
-				l := material.Body1(th, "No data yet.")
-				layout.Flex{
-					Axis:      layout.Vertical,
-					Alignment: layout.Middle,
-					Spacing:   layout.SpaceAround,
-				}.Layout(gtx,
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						gtx.Constraints.Min = image.Point{}
-						return l.Layout(gtx)
-					}),
-					layout.Rigid(func(gtx C) D {
-						gtx.Constraints.Min = image.Point{}
-						if launched {
-							gtx = gtx.Disabled()
-						}
-						return material.Button(th, &launchBtn, "Launch Sensors").Layout(gtx)
-					}),
-					layout.Rigid(func(gtx C) D {
-						gtx.Constraints.Min = image.Point{}
-						if launched {
-							gtx = gtx.Disabled()
-						}
-						return material.Button(th, &explorerBtn, "Open Existing Trace").Layout(gtx)
-					}),
-					layout.Rigid(func(gtx C) D {
-						gtx.Constraints.Min = image.Point{}
-						return material.Body2(th, sensorsErr).Layout(gtx)
-					}),
-				)
-			}
+				ui.Layout(gtx)
+			}()
 			ev.Frame(gtx.Ops)
 		}
 	}
