@@ -42,6 +42,8 @@ type ChartData struct {
 	pan          gesture.Scroll
 	panBar       widget.Scrollbar
 	xOffset      int64
+	xOrigin      int64
+	paused       widget.Bool
 	nsPerDp      int64
 	// returnPath is a scratch slice used to build each data series'
 	// path.
@@ -177,7 +179,30 @@ func (c *ChartData) layoutYAxisLabels(gtx C, th *material.Theme, pxPerWatt int, 
 	return D{Size: origConstraints.Max}
 }
 
+func (c *ChartData) Update(gtx C) {
+	if c.paused.Update(gtx) {
+		c.xOrigin = c.DomainMax + c.xOffset
+		c.xOffset = 0
+	}
+	c.Stacked.Update(gtx)
+	for _, ev := range gtx.Events(c) {
+		switch ev := ev.(type) {
+		case pointer.Event:
+			switch ev.Kind {
+			case pointer.Enter:
+				c.isHovered = true
+				c.pos = ev.Position
+			case pointer.Leave, pointer.Cancel:
+				c.isHovered = false
+			case pointer.Move:
+				c.pos = ev.Position
+			}
+		}
+	}
+}
+
 func (c *ChartData) Layout(gtx C, th *material.Theme) D {
+	c.Update(gtx)
 	if len(c.Series) < 1 {
 		return D{Size: gtx.Constraints.Max}
 	}
@@ -193,7 +218,7 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 	// Determine the space occupied by the key.
 	macro = op.Record(gtx.Ops)
 	gtx.Constraints.Min.X = gtx.Constraints.Max.X
-	keyDims := c.layoutKey(gtx, th)
+	keyDims := c.layoutControls(gtx, th)
 	keyCall := macro.Stop()
 
 	// Lay out the plot in the remaining space after accounting for axis
@@ -252,71 +277,64 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 	)
 }
 
-func (c *ChartData) layoutKey(gtx C, th *material.Theme) D {
-	return outlay.FlowWrap{}.Layout(gtx, len(c.Headings)+1, func(gtx layout.Context, i int) layout.Dimensions {
-		return layout.UniformInset(8).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			if i == len(c.Headings) {
-				sum := 0.0
-				for sumIdx, series := range c.Series {
-					if c.Enabled[sumIdx].Value {
-						sum += series.Sum
+func (c *ChartData) layoutControls(gtx C, th *material.Theme) D {
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return material.CheckBox(th, &c.paused, "Paused").Layout(gtx)
+		}),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return outlay.FlowWrap{}.Layout(gtx, len(c.Headings)+1, func(gtx layout.Context, i int) layout.Dimensions {
+				return layout.UniformInset(8).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					if i == len(c.Headings) {
+						sum := 0.0
+						for sumIdx, series := range c.Series {
+							if c.Enabled[sumIdx].Value {
+								sum += series.Sum
+							}
+						}
+						return material.Body2(th, fmt.Sprintf("Total recorded: %.2f J", sum)).Layout(gtx)
 					}
-				}
-				return material.Body2(th, fmt.Sprintf("Total recorded: %.2f J", sum)).Layout(gtx)
-			}
-			c.Enabled[i].Update(gtx)
-			enabled := c.Enabled[i].Value
-			disabledAlpha := uint8(100)
-			return layout.Flex{Alignment: layout.Baseline}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					sideLen := gtx.Dp(10)
-					sz := image.Pt(sideLen, sideLen)
-					fullColor := colors[i]
-					if !enabled {
-						fullColor.A = disabledAlpha
-					}
-					paint.FillShape(gtx.Ops, fullColor, clip.Rect{Max: sz}.Op())
-					return c.Enabled[i].Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return D{Size: sz}
-					})
-				}),
-				layout.Rigid(layout.Spacer{Width: 8}.Layout),
-				layout.Rigid(func(gtx C) D {
-					l := material.Body2(th, c.Headings[i])
-					if !enabled {
-						l.Color.A = disabledAlpha
-					}
-					return l.Layout(gtx)
-				}),
-				layout.Rigid(layout.Spacer{Width: 8}.Layout),
-				layout.Rigid(func(gtx C) D {
-					l := material.Body2(th, fmt.Sprintf("%.2f J", c.Series[i].Sum))
-					if !enabled {
-						l.Color.A = disabledAlpha
-					}
-					return l.Layout(gtx)
-				}),
-			)
-		})
-	})
+					c.Enabled[i].Update(gtx)
+					enabled := c.Enabled[i].Value
+					disabledAlpha := uint8(100)
+					return layout.Flex{Alignment: layout.Baseline}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							sideLen := gtx.Dp(10)
+							sz := image.Pt(sideLen, sideLen)
+							fullColor := colors[i]
+							if !enabled {
+								fullColor.A = disabledAlpha
+							}
+							paint.FillShape(gtx.Ops, fullColor, clip.Rect{Max: sz}.Op())
+							return c.Enabled[i].Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return D{Size: sz}
+							})
+						}),
+						layout.Rigid(layout.Spacer{Width: 8}.Layout),
+						layout.Rigid(func(gtx C) D {
+							l := material.Body2(th, c.Headings[i])
+							if !enabled {
+								l.Color.A = disabledAlpha
+							}
+							return l.Layout(gtx)
+						}),
+						layout.Rigid(layout.Spacer{Width: 8}.Layout),
+						layout.Rigid(func(gtx C) D {
+							l := material.Body2(th, fmt.Sprintf("%.2f J", c.Series[i].Sum))
+							if !enabled {
+								l.Color.A = disabledAlpha
+							}
+							return l.Layout(gtx)
+						}),
+					)
+				})
+			})
+		}),
+	)
+
 }
 
 func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, domainMax int64, pxPerWatt int, rangeMin, rangeMax float64) {
-	c.Stacked.Update(gtx)
-	for _, ev := range gtx.Events(c) {
-		switch ev := ev.(type) {
-		case pointer.Event:
-			switch ev.Kind {
-			case pointer.Enter:
-				c.isHovered = true
-				c.pos = ev.Position
-			case pointer.Leave, pointer.Cancel:
-				c.isHovered = false
-			case pointer.Move:
-				c.pos = ev.Position
-			}
-		}
-	}
 	dist := c.zoom.Update(gtx.Metric, gtx.Queue, gtx.Now, gesture.Vertical)
 	if dist != 0 {
 		proportion := 1 + float64(dist)/float64(gtx.Constraints.Max.Y)
@@ -331,22 +349,32 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 	if panDist := c.panBar.ScrollDistance(); panDist != 0 {
 		pannedNS += int64(panDist * float32(totalDomainInterval))
 	}
+	origin := c.DomainMax
+	if c.paused.Value {
+		origin = c.xOrigin
+	}
 	if pannedNS != 0 {
-		if c.xOffset+pannedNS <= 0 && c.DomainMax+c.xOffset+pannedNS >= c.DomainMin {
+		if endCandidate := origin + c.xOffset + pannedNS; endCandidate >= c.DomainMin && endCandidate <= c.DomainMax {
 			c.xOffset += pannedNS
-		} else if c.xOffset+pannedNS > 0 {
-			c.xOffset = 0
 		}
+	}
+	maxVisibleX := origin + c.xOffset
+	if maxVisibleX > c.DomainMax {
+		maxVisibleX = c.DomainMax
 	}
 	numDp := gtx.Metric.PxToDp(gtx.Constraints.Max.X)
 	visibleDomainInterval := int64(math.Round(float64(numDp * unit.Dp(c.nsPerDp))))
 	// visibleDomainEnd forces the first datapoint to be an even multiple of the current
 	// scale, which prevents weird cross-frame sampling artifacts.
-	visibleDomainEnd := ((c.DomainMax + c.xOffset) / c.nsPerDp) * c.nsPerDp
+	visibleDomainEnd := ((maxVisibleX) / c.nsPerDp) * c.nsPerDp
 	visibleDomainStart := visibleDomainEnd - visibleDomainInterval
 	var maxY int
 	maxY, pxPerWatt, rangeMax = c.computeRange(gtx)
 	c.computeVisible(gtx, maxY, visibleDomainStart, visibleDomainEnd, rangeMax)
+	end := visibleDomainEnd - c.DomainMin
+	start := visibleDomainStart - c.DomainMin
+	vpStart := float32(start) / float32(totalDomainInterval)
+	vpEnd := float32(end) / float32(totalDomainInterval)
 
 	dims = c.Stacked.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Stack{Alignment: layout.S}.Layout(gtx,
@@ -361,9 +389,9 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 				// Draw grid underneath plot.
 				c.layoutYAxisGrid(gtx, maxY, pxPerWatt)
 				if !c.Stacked.Value {
-					c.layoutLinePlot(gtx, visibleDomainStart, visibleDomainEnd, maxY, pxPerWatt, rangeMax)
+					c.layoutLinePlot(gtx, maxY, pxPerWatt, rangeMax)
 				} else {
-					c.layoutStackPlot(gtx, visibleDomainStart, visibleDomainEnd, maxY, pxPerWatt, rangeMax)
+					c.layoutStackPlot(gtx, maxY, pxPerWatt, rangeMax)
 				}
 				call := macro.Stop()
 				if c.isHovered {
@@ -447,10 +475,6 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 				return D{Size: gtx.Constraints.Max}
 			}),
 			layout.Expanded(func(gtx C) D {
-				end := visibleDomainEnd - c.DomainMin
-				start := visibleDomainStart - c.DomainMin
-				vpStart := float32(start) / float32(totalDomainInterval)
-				vpEnd := float32(end) / float32(totalDomainInterval)
 				scrollbar := material.Scrollbar(th, &c.panBar)
 				scrollbar.Track.MajorPadding = 0
 				scrollbar.Track.MinorPadding = 0
@@ -499,7 +523,6 @@ func (c *ChartData) computeRange(gtx C) (maxY, pxPerWatt int, rangeMax float64) 
 }
 
 func (c *ChartData) computeVisible(gtx C, maxY int, domainMin, domainMax int64, rangeMax float64) {
-	nanosPerPx := int64(math.Round(float64(c.nsPerDp) / float64(gtx.Metric.PxPerDp)))
 
 	rangeMin := float64(0)
 	rangeInterval := float32(rangeMax - rangeMin)
@@ -508,15 +531,15 @@ func (c *ChartData) computeVisible(gtx C, maxY int, domainMin, domainMax int64, 
 	}
 
 	oneDp := float32(gtx.Dp(1))
-	totalIntervals := gtx.Constraints.Max.X
+	totalIntervals := int(ceil(gtx.Metric.PxToDp(gtx.Constraints.Max.X)))
 	for i, series := range c.Series {
 		if c.Enabled[i].Value {
 			c.seriesSlices[i] = c.seriesSlices[i][:0]
 			c.returnPath = c.returnPath[:0]
 			intervalMean := 0.0
 			for intervalCount := 1; intervalCount <= totalIntervals; intervalCount++ {
-				tsStart := domainMax - (nanosPerPx * int64(intervalCount))
-				tsEnd := tsStart + nanosPerPx
+				tsStart := domainMax - (c.nsPerDp * int64(intervalCount))
+				tsEnd := tsStart + c.nsPerDp
 				var ok bool
 				_, intervalMean, _, ok = series.RatesBetween(tsStart, tsEnd)
 				if !ok {
@@ -564,7 +587,7 @@ func (c *ChartData) layoutYAxisGrid(gtx C, maxY, pxPerWatt int) {
 	}
 }
 
-func (c *ChartData) layoutLinePlot(gtx C, domainMin, domainMax int64, maxY, pxPerWatt int, rangeMax float64) {
+func (c *ChartData) layoutLinePlot(gtx C, maxY, pxPerWatt int, rangeMax float64) {
 	rangeMin := float64(0)
 	rangeInterval := float32(rangeMax - rangeMin)
 	if rangeInterval == 0 {
@@ -638,11 +661,7 @@ func (c *ChartData) layoutLinePlot(gtx C, domainMin, domainMax int64, maxY, pxPe
 	}
 }
 
-func (c *ChartData) layoutStackPlot(gtx C, domainMin, domainMax int64, maxY, pxPerWatt int, rangeMax float64) {
-	domainInterval := float32(domainMax - domainMin)
-	if domainInterval == 0 {
-		domainInterval = 1
-	}
+func (c *ChartData) layoutStackPlot(gtx C, maxY, pxPerWatt int, rangeMax float64) {
 	rangeMin := float64(0)
 	rangeInterval := float32(rangeMax - rangeMin)
 	if rangeInterval == 0 {
