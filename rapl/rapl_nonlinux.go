@@ -1,4 +1,5 @@
-//go:build !linux
+//go:build !linux && !windows
+
 package rapl
 
 import "git.sr.ht/~whereswaldon/watt-wiser/sensors"
