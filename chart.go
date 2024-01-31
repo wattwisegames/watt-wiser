@@ -22,7 +22,18 @@ import (
 	"gioui.org/widget/material"
 	"gioui.org/x/outlay"
 	"golang.org/x/exp/constraints"
+	"golang.org/x/exp/shiny/materialdesign/icons"
 )
+
+var pauseIcon = func() *widget.Icon {
+	icon, _ := widget.NewIcon(icons.AVPause)
+	return icon
+}()
+
+var playIcon = func() *widget.Icon {
+	icon, _ := widget.NewIcon(icons.AVPlayArrow)
+	return icon
+}()
 
 type timeslice struct {
 	tsStart, tsEnd int64
@@ -44,7 +55,8 @@ type ChartData struct {
 	panBar       widget.Scrollbar
 	xOffset      int64
 	xOrigin      int64
-	paused       widget.Bool
+	paused       bool
+	pauseBtn     widget.Clickable
 	nsPerDp      int64
 	// returnPath is a scratch slice used to build each data series'
 	// path.
@@ -183,7 +195,8 @@ func (c *ChartData) layoutYAxisLabels(gtx C, th *material.Theme, pxPerWatt int, 
 }
 
 func (c *ChartData) Update(gtx C) {
-	if c.paused.Update(gtx) {
+	if c.pauseBtn.Clicked(gtx) {
+		c.paused = !c.paused
 		c.xOrigin = c.DomainMax + c.xOffset
 		c.xOffset = 0
 	}
@@ -253,9 +266,19 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 							return c.layoutYAxisLabels(gtx, th, pxPerWatt, rangeMin, rangeMax)
 						}),
 						layout.Rigid(func(gtx C) D {
-							return D{Size: image.Point{
+							gtx.Constraints = layout.Exact(image.Point{
+								X: axisLabelDims.Size.Y * 2,
 								Y: axisLabelDims.Size.Y,
-							}}
+							})
+							icon := pauseIcon
+							if c.paused {
+								icon = playIcon
+							}
+							return material.Clickable(gtx, &c.pauseBtn, func(gtx layout.Context) layout.Dimensions {
+								return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									return icon.Layout(gtx, th.Fg)
+								})
+							})
 						}),
 					)
 				}),
@@ -288,9 +311,6 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 
 func (c *ChartData) layoutControls(gtx C, th *material.Theme) D {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return material.CheckBox(th, &c.paused, "Paused").Layout(gtx)
-		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return outlay.FlowWrap{}.Layout(gtx, len(c.Headings)+1, func(gtx layout.Context, i int) layout.Dimensions {
 				return layout.UniformInset(8).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -359,7 +379,7 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 		pannedNS += int64(panDist * float32(totalDomainInterval))
 	}
 	origin := c.DomainMax
-	if c.paused.Value {
+	if c.paused {
 		origin = c.xOrigin
 	}
 	if pannedNS != 0 {
