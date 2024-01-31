@@ -419,7 +419,7 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 	dist := c.zoom.Update(gtx.Metric, gtx.Queue, gtx.Now, gesture.Vertical)
 	if dist != 0 {
 		proportion := 1 + float64(dist)/float64(gtx.Constraints.Max.Y)
-		c.nsPerDp = int64(math.Round(float64(c.nsPerDp) * proportion))
+		c.nsPerDp = max(int64(math.Round(float64(c.nsPerDp)*proportion)), 1)
 	}
 	var pannedNS int64
 	dist = c.pan.Update(gtx.Metric, gtx.Queue, gtx.Now, gesture.Horizontal)
