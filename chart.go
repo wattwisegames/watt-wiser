@@ -20,7 +20,7 @@ import (
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
-	"gioui.org/x/outlay"
+	"gioui.org/x/component"
 	"golang.org/x/exp/constraints"
 	"golang.org/x/exp/shiny/materialdesign/icons"
 )
@@ -57,6 +57,7 @@ type ChartData struct {
 	xOrigin      int64
 	paused       bool
 	pauseBtn     widget.Clickable
+	keyTable     component.GridState
 	nsPerDp      int64
 	// returnPath is a scratch slice used to build each data series'
 	// path.
@@ -310,57 +311,108 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 }
 
 func (c *ChartData) layoutControls(gtx C, th *material.Theme) D {
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return outlay.FlowWrap{}.Layout(gtx, len(c.Headings)+1, func(gtx layout.Context, i int) layout.Dimensions {
-				return layout.UniformInset(8).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					if i == len(c.Headings) {
-						sum := 0.0
-						for sumIdx, series := range c.Series {
-							if c.Enabled[sumIdx].Value {
-								sum += series.Sum
-							}
-						}
-						return material.Body2(th, fmt.Sprintf("Total recorded: %.2f J", sum)).Layout(gtx)
-					}
-					c.Enabled[i].Update(gtx)
-					enabled := c.Enabled[i].Value
-					disabledAlpha := uint8(100)
-					return layout.Flex{Alignment: layout.Baseline}.Layout(gtx,
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							sideLen := gtx.Dp(10)
-							sz := image.Pt(sideLen, sideLen)
-							fullColor := colors[i]
-							if !enabled {
-								fullColor.A = disabledAlpha
-							}
-							paint.FillShape(gtx.Ops, fullColor, clip.Rect{Max: sz}.Op())
-							return c.Enabled[i].Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								return D{Size: sz}
-							})
-						}),
-						layout.Rigid(layout.Spacer{Width: 8}.Layout),
-						layout.Rigid(func(gtx C) D {
-							l := material.Body2(th, c.Headings[i])
-							if !enabled {
-								l.Color.A = disabledAlpha
-							}
-							return l.Layout(gtx)
-						}),
-						layout.Rigid(layout.Spacer{Width: 8}.Layout),
-						layout.Rigid(func(gtx C) D {
-							l := material.Body2(th, fmt.Sprintf("%.2f J", c.Series[i].Sum))
-							if !enabled {
-								l.Color.A = disabledAlpha
-							}
-							return l.Layout(gtx)
-						}),
-					)
-				})
-			})
-		}),
-	)
+	table := component.Table(th, &c.keyTable)
+	colorColWidth := gtx.Dp(50)
+	totalColWidth := gtx.Dp(100)
+	nameColWidth := gtx.Constraints.Max.X - colorColWidth - totalColWidth - gtx.Dp(table.VScrollbarStyle.Width())
+	rowHeight := gtx.Sp(20)
+	return table.Layout(gtx, len(c.Headings)+1, 3,
+		func(axis layout.Axis, index, constraint int) int {
+			if axis == layout.Vertical {
+				return min(constraint, rowHeight)
+			}
 
+			var size int
+			switch index {
+			case 0:
+				size = colorColWidth
+			case 1:
+				size = nameColWidth
+			default:
+				size = totalColWidth
+			}
+			return min(size, constraint)
+		},
+		func(gtx layout.Context, index int) layout.Dimensions {
+			var l material.LabelStyle
+			switch index {
+			case 0:
+				l = material.Body1(th, "Color")
+			case 1:
+				l = material.Body1(th, "Data Series Name")
+			default:
+				l = material.Body1(th, "Total Joules")
+			}
+			l.Alignment = text.Middle
+			l.Color = th.ContrastFg
+			return layout.Background{}.Layout(gtx,
+				func(gtx layout.Context) layout.Dimensions {
+					paint.FillShape(gtx.Ops, th.ContrastBg, clip.Rect{Max: gtx.Constraints.Max}.Op())
+					return D{Size: gtx.Constraints.Min}
+				}, func(gtx layout.Context) layout.Dimensions {
+					return l.Layout(gtx)
+				},
+			)
+		},
+		func(gtx layout.Context, row, col int) (dims layout.Dimensions) {
+			defer func() {
+				dims.Size = gtx.Constraints.Constrain(dims.Size)
+			}()
+			if row == len(c.Headings) {
+				switch col {
+				case 0:
+					return layout.Dimensions{Size: gtx.Constraints.Min}
+				case 1:
+					return material.Body2(th, "Total of enabled series").Layout(gtx)
+				default:
+					sum := 0.0
+					for sumIdx, series := range c.Series {
+						if c.Enabled[sumIdx].Value {
+							sum += series.Sum
+						}
+					}
+					l := material.Body2(th, fmt.Sprintf("%.2f", sum))
+					l.Alignment = text.End
+					return l.Layout(gtx)
+				}
+			}
+			if row&1 != 0 {
+				col := colors[row]
+				col.A = 50
+				paint.FillShape(gtx.Ops, col, clip.Rect{Max: gtx.Constraints.Max}.Op())
+			}
+			c.Enabled[row].Update(gtx)
+			enabled := c.Enabled[row].Value
+			disabledAlpha := uint8(100)
+			switch col {
+			case 0:
+				return c.Enabled[row].Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						sideLen := gtx.Dp(10)
+						sz := image.Pt(sideLen, sideLen)
+						fullColor := colors[row]
+						if !enabled {
+							fullColor.A = disabledAlpha
+						}
+						paint.FillShape(gtx.Ops, fullColor, clip.Rect{Max: sz}.Op())
+						return D{Size: sz}
+					})
+				})
+			case 1:
+				l := material.Body2(th, c.Headings[row])
+				if !enabled {
+					l.Color.A = disabledAlpha
+				}
+				return l.Layout(gtx)
+			default:
+				l := material.Body2(th, fmt.Sprintf("%.2f", c.Series[row].Sum))
+				if !enabled {
+					l.Color.A = disabledAlpha
+				}
+				l.Alignment = text.End
+				return l.Layout(gtx)
+			}
+		})
 }
 
 func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, domainMax int64, pxPerWatt int, rangeMin, rangeMax float64) {
