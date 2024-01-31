@@ -16,6 +16,7 @@ import (
 	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
+	"gioui.org/text"
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
@@ -123,12 +124,14 @@ func (c *ChartData) layoutYAxisLabels(gtx C, th *material.Theme, pxPerWatt int, 
 
 	axisMacro := op.Record(gtx.Ops)
 
+	yAxisLabel := material.Body2(th, fmt.Sprintf("Power Draw in Watts (scale = %.1f Dp/Watt)", gtx.Metric.PxToDp(pxPerWatt)))
+	yAxisLabel.MaxLines = 1
 	axisDims := layout.Flex{
 		Axis:      layout.Vertical,
 		Alignment: layout.Middle,
 	}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return material.Body2(th, fmt.Sprintf("Power Draw in Watts (scale = %.1f Dp/Watt)", gtx.Metric.PxToDp(pxPerWatt))).Layout(gtx)
+			return yAxisLabel.Layout(gtx)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			// Lay out the minimum label.
@@ -234,8 +237,11 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 	domainStartSecs := domainEndSecs - domainIntervalSecs
 	plotCall := macro.Stop()
 	gtx.Constraints = origConstraints
-	minDomainLabel := material.Body1(th, strconv.FormatFloat(domainStartSecs, 'f', 3, 64)+" seconds")
-	maxDomainLabel := material.Body1(th, strconv.FormatFloat(domainEndSecs, 'f', 3, 64)+" seconds")
+	minDomainLabel := material.Body1(th, strconv.FormatFloat(domainStartSecs, 'f', 3, 64)+"s")
+	maxDomainLabel := material.Body1(th, strconv.FormatFloat(domainEndSecs, 'f', 3, 64)+"s")
+	xAxisLabel := material.Body2(th, fmt.Sprintf("Time (spans %.2f s, scale = %d ns/Dp)", domainIntervalSecs, c.nsPerDp))
+	xAxisLabel.MaxLines = 1
+	xAxisLabel.Alignment = text.Middle
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{}.Layout(gtx,
@@ -260,9 +266,12 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 							return dims
 						}),
 						layout.Rigid(func(gtx C) D {
-							return layout.Flex{Axis: layout.Horizontal, Spacing: layout.SpaceBetween}.Layout(gtx,
+							return layout.Flex{
+								Axis:      layout.Horizontal,
+								Alignment: layout.Baseline,
+							}.Layout(gtx,
 								layout.Rigid(minDomainLabel.Layout),
-								layout.Rigid(material.Body2(th, fmt.Sprintf("Time (spans %.2f s, scale = %d ns/Dp)", domainIntervalSecs, c.nsPerDp)).Layout),
+								layout.Flexed(1, xAxisLabel.Layout),
 								layout.Rigid(maxDomainLabel.Layout),
 							)
 						}),
