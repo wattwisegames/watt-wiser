@@ -11,8 +11,10 @@ Usable for simple energy estimation. The GUI is functional on Linux, macOS, and 
 | OS | Intel CPU | AMD CPU | Apple CPU | NVIDIA GPU | AMD GPU |
 | --- | --- | --- | --- | --- | --- |
 | Linux | ✅ (RAPL) | ✅ (RAPL) | N/A | ✅ (NVML) | ✅ (HWMON) |
-| Windows | ❌| ❌| N/A | ✅ (NVML) | ❌|
+| Windows | ✅ (RAPL) | ⚠* (RAPL) ️| N/A | ✅ (NVML) | ❌|
 | macOS | ❌| N/A | ❌ | ❌ | ❌|
+
+> *AMD CPUs on Windows are supported by the Scaphandre driver we use to read CPUs, but we can't yet extract the energy data.
 
 Interested users on platforms without sensor support can still try the GUI out on the included example trace file.
 
@@ -91,6 +93,10 @@ sudo ./watt-wiser-sensors | ./watt-wiser
 
 You'll need the latest version of [Go](https://golang.org/dl) and an installation of [`git`](https://git-scm.com/download/win).
 
+You will also need to install [Scaphandre](https://hubblo-org.github.io/scaphandre-documentation/tutorials/installation-windows.html) in order to get their Windows RAPL driver. Without this driver, Windows does not offer any way to read the hardware energy sensors.
+
+If you have installation errors with the Scaphandre installer, make sure you have [the Microsoft C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170#visual-studio-2015-2017-2019-and-2022).
+
 After Go is installed, do the following:
 
 First, you'll need to clone the repo:
@@ -137,6 +143,10 @@ To run the GUI against a trace, you can run:
 ```
 ./watt-wiser.exe ./trace.csv
 ```
+
+If you want to view your data live, make sure you have both `watt-wiser.exe` and `watt-wiser-sensors.exe` *in the same folder.*
+
+Then simply run `./watt-wiser.exe` and select "Launch Sensors".
 
 ## GUI Controls
 
