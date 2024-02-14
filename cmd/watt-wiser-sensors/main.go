@@ -71,11 +71,11 @@ func main() {
 	flag.Parse()
 	raplWatches, err := rapl.FindRAPL()
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("failed loading RAPL sensors: %v",err)
 	}
 	relevantSubfeatures, err := hwmon.FindEnergySensors()
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("failed loading HWMON sensors: %v",err)
 	}
 	gpuSensors, err := nvml.FindGPUSensors()
 	if err != nil {
