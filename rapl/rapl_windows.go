@@ -20,6 +20,7 @@ import (
 )
 
 type manufacturer uint8
+
 const (
 	Intel manufacturer = iota
 	AMD
@@ -27,12 +28,17 @@ const (
 
 const (
 	// Intel MSRs
-	MSR_RAPL_POWER_UNIT   uint64= 0x606
-	MSR_PKG_ENERGY_STATUS uint64= 0x611
+	MSR_RAPL_POWER_UNIT        uint64 = 0x606
+	MSR_PKG_ENERGY_STATUS      uint64 = 0x611
+	MSR_DRAM_ENERGY_STATUS     uint64 = 0x00000619
+	MSR_PP0_ENERGY_STATUS      uint64 = 0x00000639
+	MSR_PP1_ENERGY_STATUS      uint64 = 0x00000641
+	MSR_PLATFORM_ENERGY_STATUS uint64 = 0x0000064d
 
 	// AMD MSRs
-	MSR_AMD_RAPL_POWER_UNIT uint64 = 0xc0010299
-	MSR_AMD_PKG_ENERGY_STATUS uint64 = 0xc001029b
+	MSR_AMD_RAPL_POWER_UNIT    uint64 = 0xc0010299
+	MSR_AMD_PKG_ENERGY_STATUS  uint64 = 0xc001029b
+	MSR_AMD_CORE_ENERGY_STATUS uint64 = 0xc001029a
 )
 
 // These constants borrowed from:
@@ -44,7 +50,9 @@ const (
 
 type RAPLSensor struct {
 	driverName string
-	manufacturer
+	name       string
+	msr        uint64
+	unit       sensors.Unit
 	powerUnit  float64
 	energyUnit float64
 	timeUnit   float64
@@ -135,23 +143,21 @@ func extractEnergyData(data uint64, unit float64) float64 {
 	return float64(data) * unit
 }
 
-func FindRAPL() ([]sensors.Sensor, error) {
-	s, err := NewRAPLSensor()
-	if err != nil {
-		return nil, err
-	}
-	return []sensors.Sensor{s}, err
+type msrInfo struct {
+	msr  uint64
+	name string
+	unit sensors.Unit
 }
 
-func NewRAPLSensor() (*RAPLSensor, error) {
-	sensor := &RAPLSensor{
+func FindRAPL() ([]sensors.Sensor, error) {
+	sensor := RAPLSensor{
 		driverName: `\\.\ScaphandreDriver`,
 	}
 	handle, err := getHandle(sensor.driverName)
 	if err != nil {
 		return nil, fmt.Errorf("failed acquiring sensor file handle: %w", err)
 	}
-	sensor.manufacturer = Intel
+	manufacturer := Intel
 	response, err := sendRequest(
 		handle,
 		MSR_RAPL_POWER_UNIT,
@@ -166,44 +172,93 @@ func NewRAPLSensor() (*RAPLSensor, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed communicating with rapl driver: %w %w", origErr, err)
 		}
-		sensor.manufacturer = AMD
+		manufacturer = AMD
 	}
 	sensor.powerUnit = extractRAPLPowerUnit(response)
 	sensor.energyUnit = extractRAPLEnergyUnit(response)
 	sensor.timeUnit = extractRAPLTimeUnit(response)
 	sensor.handle = handle
-	return sensor, nil
-}
 
-func (r *RAPLSensor) energyMSR() uint64 {
-	switch r.manufacturer {
+	tryMSRs := []msrInfo{}
+	switch manufacturer {
 	case Intel:
-		return MSR_PKG_ENERGY_STATUS
+		tryMSRs = append(tryMSRs,
+			msrInfo{
+				name: "intel pkg-0",
+				msr:  MSR_PKG_ENERGY_STATUS,
+				unit: sensors.Joules,
+			},
+			msrInfo{
+				name: "intel dram",
+				msr:  MSR_DRAM_ENERGY_STATUS,
+				unit: sensors.Joules,
+			},
+			msrInfo{
+				name: "intel pp0",
+				msr:  MSR_PP0_ENERGY_STATUS,
+				unit: sensors.Joules,
+			},
+			msrInfo{
+				name: "intel pp1 (uncore?)",
+				msr:  MSR_PP1_ENERGY_STATUS,
+				unit: sensors.Joules,
+			},
+			msrInfo{
+				name: "intel platform (psys?)",
+				msr:  MSR_PLATFORM_ENERGY_STATUS,
+				unit: sensors.Joules,
+			},
+		)
 	case AMD:
-		return MSR_AMD_PKG_ENERGY_STATUS
-	default:
-		return 0
+		tryMSRs = append(tryMSRs,
+			msrInfo{
+				name: "amd pkg-0",
+				msr:  MSR_AMD_PKG_ENERGY_STATUS,
+				unit: sensors.Joules,
+			},
+			msrInfo{
+				name: "amd core",
+				msr:  MSR_AMD_CORE_ENERGY_STATUS,
+				unit: sensors.Joules,
+			},
+		)
 	}
+	var sensorList []sensors.Sensor
+	for _, msr := range tryMSRs {
+		sensorCopy := sensor
+		sensorCopy.unit = msr.unit
+		sensorCopy.msr = msr.msr
+		sensorCopy.name = msr.name
+		_, err := sensorCopy.Read()
+		if err != nil {
+			continue
+		}
+		sensorList = append(sensorList, &sensorCopy)
+	}
+	return sensorList, err
 }
 
 func (r *RAPLSensor) Read() (float64, error) {
 	response, err := sendRequest(
 		r.handle,
-		r.energyMSR(),
+		r.msr,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("failed reading energy: %w", err)
 	}
-	raw := extractEnergyData(response, r.energyUnit)
-	inc := raw - r.previous
-	r.previous = raw
-	return inc, nil
+	if r.unit == sensors.Joules {
+		raw := extractEnergyData(response, r.energyUnit)
+		inc := raw - r.previous
+		r.previous = raw
+		return inc, nil
+	}
+	return extractEnergyData(response, r.powerUnit), nil
 }
 
 func (r *RAPLSensor) Name() string {
-	return "package-0"
+	return r.name
 }
 
 func (r *RAPLSensor) Unit() sensors.Unit {
-	return sensors.Joules
+	return r.unit
 }
