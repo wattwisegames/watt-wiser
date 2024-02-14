@@ -52,11 +52,23 @@ func (s *Series) RatesBetween(timestampA, timestampB int64) (maximum, mean, mini
 	if timestampB < timestampA {
 		timestampA, timestampB = timestampB, timestampA
 	}
+	if timestampA > s.endTimestamps[len(s.endTimestamps)-1] {
+		// queried range starts after the end of all data.
+		return 0, 0, 0, false
+	}
+	if timestampB < s.startTimestamps[0] {
+		// queried range ends before the start of all data.
+		return 0, 0, 0, false
+	}
 	indexA := sort.Search(len(s.startTimestamps), func(i int) bool {
 		return timestampA < s.endTimestamps[i]
 	})
 	if indexA == len(s.startTimestamps) {
 		return 0, 0, 0, false
+	}
+	for timestampA > s.endTimestamps[indexA] {
+		// While timestampA is in the void between real samples, increment it.
+		indexA++
 	}
 	indexB := sort.Search(len(s.startTimestamps), func(i int) bool {
 		return timestampB < s.endTimestamps[i]
@@ -69,15 +81,24 @@ func (s *Series) RatesBetween(timestampA, timestampB int64) (maximum, mean, mini
 		// If the last timestamp is exactly equal to the end of the final time, then we can proceed.
 		indexB--
 	}
+	for timestampB < s.startTimestamps[indexB] {
+		// While timestampB is in the void between real samples, decrement it.
+		indexB--
+	}
 	if indexA == indexB {
-		v := s.values[indexA]
-		interval := float64(s.endTimestamps[indexA] - s.startTimestamps[indexA])
-		mean := v / (interval / 1_000_000_000)
-		ok = true
-		return mean, mean, mean, ok
+		if (timestampA >= s.startTimestamps[indexA] && timestampA < s.endTimestamps[indexA]) ||
+			(timestampB > s.startTimestamps[indexA] && timestampB < s.endTimestamps[indexA]) {
+			v := s.values[indexA]
+			interval := float64(s.endTimestamps[indexA] - s.startTimestamps[indexA])
+			mean := v / (interval / 1_000_000_000)
+			ok = true
+			return mean, mean, mean, ok
+		}
+		return 0, 0, 0, false
 	}
 	values := s.values[indexA : indexB+1]
 	hasExtrema := false
+	observedInterval := 0.0
 	for i, v := range values {
 		interval := float64(s.endTimestamps[indexA+i] - s.startTimestamps[indexA+i])
 		if i == 0 || i == len(values)-1 {
@@ -106,7 +127,8 @@ func (s *Series) RatesBetween(timestampA, timestampB int64) (maximum, mean, mini
 			minimum = v
 			hasExtrema = true
 		}
+		observedInterval += interval
 	}
-	mean /= (float64(timestampB-timestampA) / 1_000_000_000)
+	mean /= (observedInterval / 1_000_000_000)
 	return maximum, mean, minimum, true
 }
