@@ -19,9 +19,20 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+type manufacturer uint8
 const (
-	MSR_RAPL_POWER_UNIT   uint16 = 0x606
-	MSR_PKG_ENERGY_STATUS uint16 = 0x611
+	Intel manufacturer = iota
+	AMD
+)
+
+const (
+	// Intel MSRs
+	MSR_RAPL_POWER_UNIT   uint64= 0x606
+	MSR_PKG_ENERGY_STATUS uint64= 0x611
+
+	// AMD MSRs
+	MSR_AMD_RAPL_POWER_UNIT uint64 = 0xc0010299
+	MSR_AMD_PKG_ENERGY_STATUS uint64 = 0xc001029b
 )
 
 // These constants borrowed from:
@@ -33,6 +44,7 @@ const (
 
 type RAPLSensor struct {
 	driverName string
+	manufacturer
 	powerUnit  float64
 	energyUnit float64
 	timeUnit   float64
@@ -62,10 +74,10 @@ func controlCode(deviceType, requestCode, method, access uint32) uint32 {
 
 func sendRequest(
 	device windows.Handle,
-	requestCode uint16,
+	requestData uint64,
 ) (uint64, error) {
+	requestCode := uint16(MSR_RAPL_POWER_UNIT)
 	var replyUsed uint32
-	requestData := uint64(requestCode)
 	request := unsafe.Slice((*byte)(unsafe.Pointer(&requestData)), unsafe.Sizeof(requestData))
 	var responseData uint64
 	response := unsafe.Slice((*byte)(unsafe.Pointer(&responseData)), unsafe.Sizeof(responseData))
@@ -125,6 +137,9 @@ func extractEnergyData(data uint64, unit float64) float64 {
 
 func FindRAPL() ([]sensors.Sensor, error) {
 	s, err := NewRAPLSensor()
+	if err != nil {
+		return nil, err
+	}
 	return []sensors.Sensor{s}, err
 }
 
@@ -136,12 +151,22 @@ func NewRAPLSensor() (*RAPLSensor, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed acquiring sensor file handle: %w", err)
 	}
+	sensor.manufacturer = Intel
 	response, err := sendRequest(
 		handle,
 		MSR_RAPL_POWER_UNIT,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed communicating with rapl driver: %w", err)
+		origErr := err
+		// Might be an AMD system, try that.
+		response, err = sendRequest(
+			handle,
+			MSR_AMD_RAPL_POWER_UNIT,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed communicating with rapl driver: %w %w", origErr, err)
+		}
+		sensor.manufacturer = AMD
 	}
 	sensor.powerUnit = extractRAPLPowerUnit(response)
 	sensor.energyUnit = extractRAPLEnergyUnit(response)
@@ -150,10 +175,21 @@ func NewRAPLSensor() (*RAPLSensor, error) {
 	return sensor, nil
 }
 
+func (r *RAPLSensor) energyMSR() uint64 {
+	switch r.manufacturer {
+	case Intel:
+		return MSR_PKG_ENERGY_STATUS
+	case AMD:
+		return MSR_AMD_PKG_ENERGY_STATUS
+	default:
+		return 0
+	}
+}
+
 func (r *RAPLSensor) Read() (float64, error) {
 	response, err := sendRequest(
 		r.handle,
-		MSR_PKG_ENERGY_STATUS,
+		r.energyMSR(),
 	)
 	if err != nil {
 		return 0, fmt.Errorf("failed reading energy: %w", err)
