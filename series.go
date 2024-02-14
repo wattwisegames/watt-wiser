@@ -85,6 +85,10 @@ func (s *Series) RatesBetween(timestampA, timestampB int64) (maximum, mean, mini
 		// While timestampB is in the void between real samples, decrement it.
 		indexB--
 	}
+	if indexB < indexA {
+		// We're querying a data hole.
+		return 0, 0, 0, false
+	}
 	if indexA == indexB {
 		if (timestampA >= s.startTimestamps[indexA] && timestampA < s.endTimestamps[indexA]) ||
 			(timestampB > s.startTimestamps[indexA] && timestampB < s.endTimestamps[indexA]) {

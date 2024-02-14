@@ -40,6 +40,7 @@ type timeslice struct {
 	xL, xR         float32
 	y              float32
 	mean           float64
+	ok             bool
 }
 
 type ChartData struct {
@@ -640,6 +641,7 @@ func (c *ChartData) computeVisible(gtx C, maxY int, domainMin, domainMax int64, 
 					xR:      xR,
 					y:       yT,
 					mean:    intervalMean,
+					ok:      ok,
 				})
 
 			}
@@ -678,20 +680,27 @@ func (c *ChartData) layoutLinePlot(gtx C, maxY, pxPerWatt int, rangeMax float64)
 
 	for i := range c.Series {
 		if c.Enabled[i].Value {
+			fmt.Println()
 			c.returnPath = c.returnPath[:0]
 			var p clip.Path
 			p.Begin(gtx.Ops)
+			prevOk := false
 			prevIntervalMean := 0.0
 			prevYT := float32(0)
 			prevYB := float32(0)
 			for dataIndex, seriesData := range c.seriesSlices[i] {
+				if !seriesData.ok {
+					continue
+				}
 				intervalMean := seriesData.mean
 				xR := seriesData.xR
 				yT := seriesData.y
 				yB := yT + oneDp
 				var nextIntervalMean float64
+				var nextIntervalOk bool
 				if dataIndex < len(c.seriesSlices[i])-1 {
 					nextIntervalMean = c.seriesSlices[i][dataIndex+1].mean
+					nextIntervalOk = c.seriesSlices[i][dataIndex+1].ok
 				}
 				nextYT := float32(maxY) - (float32(nextIntervalMean-rangeMin)/rangeInterval)*float32(maxY)
 				if nextYT > yT || prevYT > yT {
@@ -702,7 +711,8 @@ func (c *ChartData) layoutLinePlot(gtx C, maxY, pxPerWatt int, rangeMax float64)
 					nextIntervalMean == intervalMean &&
 					dataIndex > 0 &&
 					dataIndex < len(c.seriesSlices[i])-1 &&
-					prevYB-prevYT == oneDp {
+					prevYB-prevYT == oneDp &&
+					nextIntervalOk {
 					// We can safely skip processing the current interval if it
 					// has the same value as the previous and next intervals,
 					// is neither the first nor the last interval in the graph,
@@ -710,12 +720,19 @@ func (c *ChartData) layoutLinePlot(gtx C, maxY, pxPerWatt int, rangeMax float64)
 					continue
 				}
 
-				if dataIndex == 0 {
+				if !prevOk {
 					// The very first interval needs to add special path segments.
-					p.MoveTo(f32.Pt(xR, yT))
+
+					point := f32.Pt(xR, yT)
+					fmt.Printf("move %v\n", point)
+					p.MoveTo(point)
 					prevYT = yT
 				}
+				point := f32.Pt(xR, prevYT)
+				fmt.Printf("line %v\n", point)
 				p.LineTo(f32.Pt(xR, prevYT))
+				point = f32.Pt(xR, yT)
+				fmt.Printf("line %v\n", point)
 				p.LineTo(f32.Pt(xR, yT))
 				c.returnPath = append(c.returnPath,
 					f32.Pt(xR, prevYB),
@@ -724,12 +741,19 @@ func (c *ChartData) layoutLinePlot(gtx C, maxY, pxPerWatt int, rangeMax float64)
 				prevYT = yT
 				prevYB = yB
 				prevIntervalMean = intervalMean
+				prevOk = seriesData.ok
 				intervalMean = nextIntervalMean
+				if !nextIntervalOk {
+					fmt.Println("return path")
+					for i := range c.returnPath {
+						point := c.returnPath[len(c.returnPath)-(i+1)]
+						fmt.Printf("line %v\n", point)
+						p.LineTo(point)
+					}
+					c.returnPath = c.returnPath[:0]
+				}
 			}
 
-			for i := range c.returnPath {
-				p.LineTo(c.returnPath[len(c.returnPath)-(i+1)])
-			}
 			p.Close()
 
 			stack := clip.Outline{
