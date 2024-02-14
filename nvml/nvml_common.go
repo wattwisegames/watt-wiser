@@ -59,7 +59,7 @@ func FindGPUSensors() ([]sensors.Sensor, error) {
 			log.Printf("failed loading NVIDIA GPU name at index %d: %v", i, err)
 			continue
 		}
-		s := sensor{
+		s := &sensor{
 			name:   name,
 			device: device,
 		}
@@ -78,16 +78,20 @@ func FindGPUSensors() ([]sensors.Sensor, error) {
 			} else {
 				s.unit = sensors.Joules
 			}
-		} else {
-			_, err = nvmlDeviceGetPowerUsage(device)
-			if err != nil {
-				// This device does not support power monitoring of any kind.
-				log.Printf("discarding NVIDIA GPU %q because does not support power monitoring: %v", name, err)
-				continue
-			}
-			s.unit = sensors.Watts
+			out = append(out, s)
 		}
-		out = append(out, &s)
+		s = &sensor{
+			name:   name,
+			device: device,
+		}
+		_, err = nvmlDeviceGetPowerUsage(device)
+		if err != nil {
+			// This device does not support power monitoring of any kind.
+			log.Printf("discarding NVIDIA GPU %q because does not support power monitoring: %v", name, err)
+			continue
+		}
+		s.unit = sensors.Watts
+		out = append(out, s)
 	}
 	return out, nil
 }
