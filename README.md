@@ -53,13 +53,13 @@ cd watt-wiser
 You can then build the gui with:
 
 ```
-go build -o watt-wiser
+go build .
 ```
 
 Build the sensors with:
 
 ```
-go build -o watt-wiser-sensors ./cmd/watt-wiser-sensors/
+go build ./cmd/watt-wiser-sensors/
 ```
 
 To see whether your hardware sensors have support, run the sensors program (running as root is required for RAPL energy data):
@@ -120,13 +120,13 @@ cd watt-wiser
 You can then build the gui with:
 
 ```
-go build -o watt-wiser
+go build .
 ```
 
 Build the sensors with:
 
 ```
-go build -o watt-wiser-sensors ./cmd/watt-wiser-sensors/
+go build ./cmd/watt-wiser-sensors/
 ```
 
 To see whether your hardware sensors have support, run the sensors program:
