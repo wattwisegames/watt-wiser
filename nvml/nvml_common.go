@@ -1,6 +1,7 @@
 package nvml
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -68,8 +69,10 @@ func FindGPUSensors() ([]sensors.Sensor, error) {
 			// energy to check if it's supported.
 			_, err = nvmlDeviceGetTotalEnergyConsumption(device)
 			if err != nil {
-				_, err = nvmlDeviceGetPowerUsage(device)
-				if err != nil {
+				err = fmt.Errorf("unable to read total energy consumption: %w", err)
+				_, perr := nvmlDeviceGetPowerUsage(device)
+				if perr != nil {
+					err = errors.Join(fmt.Errorf("unable to read power usage: %w", perr), err)
 					// This device does not support power monitoring of any kind.
 					log.Printf("discarding NVIDIA GPU %q because does not support power monitoring: %v", name, err)
 					continue
