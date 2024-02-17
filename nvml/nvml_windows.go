@@ -4,6 +4,7 @@ package nvml
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"unsafe"
@@ -42,6 +43,7 @@ func platformInit() error {
 	for _, symbol := range optionalSymbols {
 		lazySym := nvml.NewProc(symbol)
 		if err := lazySym.Find(); err != nil {
+			log.Printf("failed resolving symbol %s: %v", symbol, err)
 			continue
 		}
 		resolved[symbol] = lazySym
