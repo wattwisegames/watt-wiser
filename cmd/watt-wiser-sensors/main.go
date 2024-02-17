@@ -10,9 +10,9 @@ import (
 	"runtime"
 	"time"
 
+	"git.sr.ht/~whereswaldon/watt-wiser/adlx"
 	"git.sr.ht/~whereswaldon/watt-wiser/hwmon"
 	"git.sr.ht/~whereswaldon/watt-wiser/nvml"
-	_ "git.sr.ht/~whereswaldon/watt-wiser/nvml"
 	"git.sr.ht/~whereswaldon/watt-wiser/rapl"
 	"git.sr.ht/~whereswaldon/watt-wiser/sensors"
 )
@@ -71,15 +71,19 @@ func main() {
 	flag.Parse()
 	raplWatches, err := rapl.FindRAPL()
 	if err != nil {
-		log.Printf("failed loading RAPL sensors: %v",err)
+		log.Printf("failed loading RAPL sensors: %v", err)
 	}
 	relevantSubfeatures, err := hwmon.FindEnergySensors()
 	if err != nil {
-		log.Printf("failed loading HWMON sensors: %v",err)
+		log.Printf("failed loading HWMON sensors: %v", err)
 	}
 	gpuSensors, err := nvml.FindGPUSensors()
 	if err != nil {
 		log.Printf("failed loading NVIDIA GPU sensors: %v", err)
+	}
+	amdGPUSensors, err := adlx.FindSensors()
+	if err != nil {
+		log.Printf("failed loading AMD GPU sensors: %v", err)
 	}
 
 	var output io.WriteCloser
@@ -100,6 +104,9 @@ func main() {
 		sensorList = append(sensorList, s)
 	}
 	for _, g := range gpuSensors {
+		sensorList = append(sensorList, g)
+	}
+	for _, g := range amdGPUSensors {
 		sensorList = append(sensorList, g)
 	}
 
