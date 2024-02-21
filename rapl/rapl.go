@@ -59,6 +59,9 @@ func FindRAPL() ([]sensors.Sensor, error) {
 	if err := filepath.WalkDir(
 		"/sys/devices/virtual/powercap/intel-rapl",
 		func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
 			if d.Name() != "energy_uj" {
 				return nil
 			}
