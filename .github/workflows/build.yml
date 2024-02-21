@@ -9,6 +9,8 @@ jobs:
       - name: Install mingw-w64
         run: sudo apt-get update && sudo apt-get install -y mingw-w64
       - uses: actions/setup-go@v5
+        with:
+            go-version: 1.21
       - name: Build Linux
         run: go build ./...
       - name: Build Windows
