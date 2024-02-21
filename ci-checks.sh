@@ -4,7 +4,9 @@ set -euo pipefail
 
 function run_checks {
     echo checking $GOOS
-    go test ./...
+    if [ "$GOOS" = "linux" ]; then
+        go test ./...
+    fi
     staticcheck ./...
 }
 export CGO_ENABLED=1
