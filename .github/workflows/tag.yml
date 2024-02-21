@@ -20,5 +20,5 @@ jobs:
         run: go install honnef.co/go/tools/cmd/staticcheck@latest
       - name: Build Releases
         run: ./ci-release.sh "$GITHUB_REF_NAME"
-      - run: Create GH Release and Upload
+      - name: Create GH Release and Upload
         run: gh release create "$GITHUB_REF_NAME" --generate-notes ./watt-wiser-"$GITHUB_REF_NAME"*
