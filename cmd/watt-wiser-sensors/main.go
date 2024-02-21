@@ -69,15 +69,15 @@ func main() {
 	dur := flag.Duration("sample-interval", 100*time.Millisecond, "Interval between reading new samples from sensors")
 	outputName := flag.String("output", "-", "Output file for CSV sensor data")
 	flag.Parse()
-	raplWatches, err := rapl.FindRAPL()
+	raplSensors, err := rapl.FindRAPL()
 	if err != nil {
 		log.Printf("failed loading RAPL sensors: %v", err)
 	}
-	relevantSubfeatures, err := hwmon.FindEnergySensors()
+	hwmonSensors, err := hwmon.FindEnergySensors()
 	if err != nil {
 		log.Printf("failed loading HWMON sensors: %v", err)
 	}
-	gpuSensors, err := nvml.FindGPUSensors()
+	nvidiaGPUSensors, err := nvml.FindGPUSensors()
 	if err != nil {
 		log.Printf("failed loading NVIDIA GPU sensors: %v", err)
 	}
@@ -96,19 +96,11 @@ func main() {
 		}
 		output = f
 	}
-	sensorList := make([]sensors.Sensor, 0, len(raplWatches)+len(relevantSubfeatures)+len(gpuSensors))
-	for _, w := range raplWatches {
-		sensorList = append(sensorList, w)
-	}
-	for _, s := range relevantSubfeatures {
-		sensorList = append(sensorList, s)
-	}
-	for _, g := range gpuSensors {
-		sensorList = append(sensorList, g)
-	}
-	for _, g := range amdGPUSensors {
-		sensorList = append(sensorList, g)
-	}
+	sensorList := make([]sensors.Sensor, 0, len(raplSensors)+len(hwmonSensors)+len(nvidiaGPUSensors))
+	sensorList = append(sensorList, raplSensors...)
+	sensorList = append(sensorList, hwmonSensors...)
+	sensorList = append(sensorList, nvidiaGPUSensors...)
+	sensorList = append(sensorList, amdGPUSensors...)
 
 	if len(sensorList) < 1 {
 		log.Fatalf("No supported sensors found. Please see https://git.sr.ht/~whereswaldon/watt-wiser or https://github.com/wattwisegames/watt-wiser for supported hardware information")
