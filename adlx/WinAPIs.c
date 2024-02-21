@@ -8,7 +8,7 @@
 #include "include/ADLXDefines.h"
 
 #if defined(_WIN32) // Microsoft compiler
-    #include <Windows.h>
+    #include <windows.h>
 #else
 #error define your copiler
 #endif
