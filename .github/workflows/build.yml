@@ -16,6 +16,7 @@ jobs:
       - name: Build Windows
         env:
             CGO_ENABLED: 1
+            CGO_CFLAGS: -I/usr/x86_64-w64-mingw32/include/
             CC:          x86_64-w64-mingw32-gcc
             CXX:         x86_64-w64-mingw32-g++
             GOOS:        windows
