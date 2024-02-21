@@ -199,6 +199,8 @@ Watt Wise thanks the following people for testing hardware support and offering 
 - Gurney Buchanon: Access to a Windows+AMD CPU system and testing on numerous devices.
 - Jack Mordaunt: Testing on AMD CPUs and NVIDIA GPUs.
 - Josh Whetton: Access to a Linux+NVIDIA GPU system.
+- Daniel Wilkins: Testing on Linux+Intel CPUs.
+- Dominik Honnef: Testing on Linux+AMD CPU/GPU systems.
 
 ## License
 
