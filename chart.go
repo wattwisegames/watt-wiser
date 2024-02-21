@@ -377,82 +377,85 @@ func (c *ChartData) layoutControls(gtx C, th *material.Theme) D {
 			defer func() {
 				dims.Size = gtx.Constraints.Constrain(dims.Size)
 			}()
-			if row == len(c.Headings) {
+			dims = layout.UniformInset(2).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				if row == len(c.Headings) {
+					switch col {
+					case colorCol:
+						return layout.Dimensions{Size: gtx.Constraints.Min}
+					case seriesNameCol:
+						return material.Body2(th, "Total of enabled series").Layout(gtx)
+					case totalJoulesCol:
+						sum := 0.0
+						for sumIdx, series := range c.Series {
+							if c.Enabled[sumIdx].Value {
+								sum += series.Sum
+							}
+						}
+						l := material.Body2(th, fmt.Sprintf("%.2f", sum))
+						l.Alignment = text.End
+						return l.Layout(gtx)
+					case totalWattHoursCol:
+						sum := 0.0
+						for sumIdx, series := range c.Series {
+							if c.Enabled[sumIdx].Value {
+								sum += series.Sum
+							}
+						}
+						sum = sum / 3600
+						l := material.Body2(th, fmt.Sprintf("%.4f", sum))
+						l.Alignment = text.End
+						return l.Layout(gtx)
+					default:
+						return material.Body2(th, "???").Layout(gtx)
+					}
+				}
+				c.Enabled[row].Update(gtx)
+				enabled := c.Enabled[row].Value
+				disabledAlpha := uint8(100)
 				switch col {
 				case colorCol:
-					return layout.Dimensions{Size: gtx.Constraints.Min}
+					return c.Enabled[row].Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							sideLen := gtx.Dp(10)
+							sz := image.Pt(sideLen, sideLen)
+							fullColor := colors[row]
+							if !enabled {
+								fullColor.A = disabledAlpha
+							}
+							paint.FillShape(gtx.Ops, fullColor, clip.Rect{Max: sz}.Op())
+							return D{Size: sz}
+						})
+					})
 				case seriesNameCol:
-					return material.Body2(th, "Total of enabled series").Layout(gtx)
-				case totalJoulesCol:
-					sum := 0.0
-					for sumIdx, series := range c.Series {
-						if c.Enabled[sumIdx].Value {
-							sum += series.Sum
-						}
+					l := material.Body2(th, c.Headings[row])
+					if !enabled {
+						l.Color.A = disabledAlpha
 					}
-					l := material.Body2(th, fmt.Sprintf("%.2f", sum))
+					return l.Layout(gtx)
+				case totalJoulesCol:
+					l := material.Body2(th, fmt.Sprintf("%.2f", c.Series[row].Sum))
+					if !enabled {
+						l.Color.A = disabledAlpha
+					}
 					l.Alignment = text.End
 					return l.Layout(gtx)
 				case totalWattHoursCol:
-					sum := 0.0
-					for sumIdx, series := range c.Series {
-						if c.Enabled[sumIdx].Value {
-							sum += series.Sum
-						}
+					l := material.Body2(th, fmt.Sprintf("%.4f", c.Series[row].Sum/3600))
+					if !enabled {
+						l.Color.A = disabledAlpha
 					}
-					sum = sum / 3600
-					l := material.Body2(th, fmt.Sprintf("%.4f", sum))
 					l.Alignment = text.End
 					return l.Layout(gtx)
 				default:
-					return material.Body2(th, "???").Layout(gtx)
+					return D{Size: gtx.Constraints.Max}
 				}
-			}
+			})
 			if row&1 != 0 {
 				col := colors[row]
 				col.A = 50
 				paint.FillShape(gtx.Ops, col, clip.Rect{Max: gtx.Constraints.Max}.Op())
 			}
-			c.Enabled[row].Update(gtx)
-			enabled := c.Enabled[row].Value
-			disabledAlpha := uint8(100)
-			switch col {
-			case colorCol:
-				return c.Enabled[row].Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						sideLen := gtx.Dp(10)
-						sz := image.Pt(sideLen, sideLen)
-						fullColor := colors[row]
-						if !enabled {
-							fullColor.A = disabledAlpha
-						}
-						paint.FillShape(gtx.Ops, fullColor, clip.Rect{Max: sz}.Op())
-						return D{Size: sz}
-					})
-				})
-			case seriesNameCol:
-				l := material.Body2(th, c.Headings[row])
-				if !enabled {
-					l.Color.A = disabledAlpha
-				}
-				return l.Layout(gtx)
-			case totalJoulesCol:
-				l := material.Body2(th, fmt.Sprintf("%.2f", c.Series[row].Sum))
-				if !enabled {
-					l.Color.A = disabledAlpha
-				}
-				l.Alignment = text.End
-				return l.Layout(gtx)
-			case totalWattHoursCol:
-				l := material.Body2(th, fmt.Sprintf("%.4f", c.Series[row].Sum/3600))
-				if !enabled {
-					l.Color.A = disabledAlpha
-				}
-				l.Alignment = text.End
-				return l.Layout(gtx)
-			default:
-				return D{Size: gtx.Constraints.Max}
-			}
+			return dims
 		})
 }
 
