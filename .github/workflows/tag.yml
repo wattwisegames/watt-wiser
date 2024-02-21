@@ -21,4 +21,6 @@ jobs:
       - name: Build Releases
         run: ./ci-release.sh "$GITHUB_REF_NAME"
       - name: Create GH Release and Upload
+        env:
+            GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" --generate-notes ./watt-wiser-"$GITHUB_REF_NAME"*
