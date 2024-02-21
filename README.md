@@ -191,6 +191,15 @@ If you want to view your data live, make sure you have both `watt-wiser.exe` and
 
 Then simply run `./watt-wiser.exe` and select "Launch Sensors".
 
+## Non-code Contributors
+
+Watt Wise thanks the following people for testing hardware support and offering access to various OS/hardware configurations for debugging. Please add yourself here if you're missing.
+
+- Ameer Ghani: Testing on numerous Linux/Windows systems.
+- Gurney Buchanon: Access to a Windows+AMD CPU system and testing on numerous devices.
+- Jack Mordaunt: Testing on AMD CPUs and NVIDIA GPUs.
+- Josh Whetton: Access to a Linux+NVIDIA GPU system.
+
 ## License
 
 UNLICENSE
