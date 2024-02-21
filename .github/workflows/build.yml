@@ -11,13 +11,5 @@ jobs:
       - uses: actions/setup-go@v5
         with:
             go-version: 1.21
-      - name: Build Linux
-        run: go build ./...
-      - name: Build Windows
-        env:
-            CGO_ENABLED: 1
-            CGO_CFLAGS: -I/usr/x86_64-w64-mingw32/include/
-            CC:          x86_64-w64-mingw32-gcc
-            CXX:         x86_64-w64-mingw32-g++
-            GOOS:        windows
-        run: go build ./...
+      - name: Run Checks
+        run: ./ci-checks.sh
