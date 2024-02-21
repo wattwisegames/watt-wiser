@@ -724,7 +724,6 @@ func (c *ChartData) layoutLinePlot(gtx C, maxY, pxPerWatt int, rangeMax float64)
 				prevYT = yT
 				prevYB = yB
 				prevIntervalMean = intervalMean
-				intervalMean = nextIntervalMean
 			}
 
 			for i := range c.returnPath {
