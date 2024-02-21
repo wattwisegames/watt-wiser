@@ -15,11 +15,12 @@ var (
 	// initErr tracks whether the one-time initialization succeeded or failed.
 	initErr error
 	// The rest of these are wrapper funcs populated by initialization.
-	nvmlInit                            func() error
-	nvmlSystemGetNVMLVersion            func() (string, error)
-	nvmlDeviceGetCount                  func() (uint64, error)
-	nvmlDeviceGetHandleByIndex          func(i uint64) (uintptr, error)
-	nvmlDeviceGetName                   func(device uintptr) (string, error)
+	nvmlInit                   func() error
+	nvmlSystemGetNVMLVersion   func() (string, error)
+	nvmlDeviceGetCount         func() (uint64, error)
+	nvmlDeviceGetHandleByIndex func(i uint64) (uintptr, error)
+	nvmlDeviceGetName          func(device uintptr) (string, error)
+	//lint:ignore U1000 The architecture may be a useful way to determine which sensor methods should be available, though we aren't using it right now.
 	nvmlDeviceGetArchitecture           func(device uintptr) (nvmlDeviceArchitecture, error)
 	nvmlDeviceGetTotalEnergyConsumption func(device uintptr) (uint64, error)
 	nvmlDeviceGetPowerUsage             func(device uintptr) (uint32, error)
