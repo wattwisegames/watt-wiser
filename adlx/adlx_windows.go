@@ -36,6 +36,9 @@ void perf_release(IADLXPerformanceMonitoringServices *perf) {
 ADLX_RESULT gpus_at_gpu_list(IADLXGPUList *gpus, int index, IADLXGPU **gpu) {
     return gpus->pVtbl->At_GPUList(gpus, index, gpu);
 }
+int gpus_size(IADLXGPUList *gpus) {
+    return gpus->pVtbl->Size(gpus);
+}
 int gpus_begin(IADLXGPUList *gpus) {
     return gpus->pVtbl->Begin(gpus);
 }
@@ -109,45 +112,48 @@ func FindSensors() ([]sensors.Sensor, error) {
 		return nil, fmt.Errorf("failed getting gpus: %d", res)
 	}
 	defer C.gpus_release(gpus)
-	var firstGPU *C.IADLXGPU
-	res = C.gpus_at_gpu_list(gpus, C.gpus_begin(gpus), &firstGPU)
-	if res != 0 {
-		return nil, fmt.Errorf("failed getting first gpu: %d", res)
-	}
-	defer C.gpu_release(firstGPU)
-	// Get GPU metrics support
-	var metricsSupport *C.IADLXGPUMetricsSupport
-	res = C.perf_get_metrics_support(perfMonitoringService, firstGPU, &metricsSupport)
-	if res != 0 {
-		return nil, fmt.Errorf("failed getting first gpu metrics support: %d", res)
-	}
-	var metrics *C.IADLXGPUMetrics
-	res = C.perf_get_metrics(perfMonitoringService, firstGPU, &metrics)
-	if res != 0 {
-		return nil, fmt.Errorf("failed getting first gpu metrics: %d", res)
-	}
-	var supportsPower C.adlx_bool
-	res = C.metrics_support_power(metricsSupport, &supportsPower)
-	if res != 0 {
-		return nil, fmt.Errorf("failed getting first gpu power support: %d", res)
-	}
-	if supportsPower != 0 {
-		sensorList = append(sensorList, sensor{
-			name:    "AMD GPU",
-			metrics: metrics,
-		})
-	}
-	var supportsTotalBoardPower C.adlx_bool
-	res = C.metrics_support_total_board_power(metricsSupport, &supportsTotalBoardPower)
-	if res != 0 {
-		return nil, fmt.Errorf("failed getting first gpu total board power support: %d", res)
-	}
-	if supportsTotalBoardPower != 0 {
-		sensorList = append(sensorList, sensor{
-			name:       "AMD GPU",
-			metrics:    metrics,
-			totalBoard: true,
-		})
+	gpuCount := C.gpus_size(gpus)	
+	for i := 0; i < int(gpuCount); i++ {
+		var firstGPU *C.IADLXGPU
+		res = C.gpus_at_gpu_list(gpus, C.int(i), &firstGPU)
+		if res != 0 {
+			return nil, fmt.Errorf("failed getting first gpu: %d", res)
+		}
+		defer C.gpu_release(firstGPU)
+		// Get GPU metrics support
+		var metricsSupport *C.IADLXGPUMetricsSupport
+		res = C.perf_get_metrics_support(perfMonitoringService, firstGPU, &metricsSupport)
+		if res != 0 {
+			return nil, fmt.Errorf("failed getting first gpu metrics support: %d", res)
+		}
+		var metrics *C.IADLXGPUMetrics
+		res = C.perf_get_metrics(perfMonitoringService, firstGPU, &metrics)
+		if res != 0 {
+			return nil, fmt.Errorf("failed getting first gpu metrics: %d", res)
+		}
+		var supportsPower C.adlx_bool
+		res = C.metrics_support_power(metricsSupport, &supportsPower)
+		if res != 0 {
+			return nil, fmt.Errorf("failed getting first gpu power support: %d", res)
+		}
+		if supportsPower != 0 {
+			sensorList = append(sensorList, sensor{
+				name:    "AMD GPU",
+				metrics: metrics,
+			})
+		}
+		var supportsTotalBoardPower C.adlx_bool
+		res = C.metrics_support_total_board_power(metricsSupport, &supportsTotalBoardPower)
+		if res != 0 {
+			return nil, fmt.Errorf("failed getting first gpu total board power support: %d", res)
+		}
+		if supportsTotalBoardPower != 0 {
+			sensorList = append(sensorList, sensor{
+				name:       "AMD GPU",
+				metrics:    metrics,
+				totalBoard: true,
+			})
+		}
 	}
 	return sensorList, nil
 }
