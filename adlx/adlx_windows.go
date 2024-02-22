@@ -48,6 +48,9 @@ void gpus_release(IADLXGPUList *gpus) {
 void gpu_release(IADLXGPU *gpu) {
     gpu->pVtbl->Release(gpu);
 }
+ADLX_RESULT gpu_name(IADLXGPU *gpu, const char**name) {
+    return gpu->pVtbl->Name(gpu, name);
+}
 */
 import "C"
 import (
@@ -120,6 +123,12 @@ func FindSensors() ([]sensors.Sensor, error) {
 			return nil, fmt.Errorf("failed getting first gpu: %d", res)
 		}
 		defer C.gpu_release(firstGPU)
+		var name *C.char
+		res = C.gpu_name(firstGPU, &name)
+		if res != 0 {
+			return nil, fmt.Errorf("failed getting first gpu name: %d", res)
+		}
+		goName := C.GoString(name)
 		// Get GPU metrics support
 		var metricsSupport *C.IADLXGPUMetricsSupport
 		res = C.perf_get_metrics_support(perfMonitoringService, firstGPU, &metricsSupport)
@@ -138,7 +147,7 @@ func FindSensors() ([]sensors.Sensor, error) {
 		}
 		if supportsPower != 0 {
 			sensorList = append(sensorList, sensor{
-				name:    "AMD GPU",
+				name:    goName,
 				metrics: metrics,
 			})
 		}
@@ -149,7 +158,7 @@ func FindSensors() ([]sensors.Sensor, error) {
 		}
 		if supportsTotalBoardPower != 0 {
 			sensorList = append(sensorList, sensor{
-				name:       "AMD GPU",
+				name:       goName,
 				metrics:    metrics,
 				totalBoard: true,
 			})
