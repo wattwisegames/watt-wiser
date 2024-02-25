@@ -248,7 +248,7 @@ func loop(w *app.Window, bundle backend.Bundle, watcher *fsnotify.Watcher, sampl
 	defer cancel()
 	ws := backend.NewWindowState(ctx, bundle, w)
 
-	ui := NewUI(ws)
+	ui := NewUI(ws, expl)
 	go func() {
 		for sample := range samples {
 			func() {

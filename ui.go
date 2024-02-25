@@ -8,6 +8,7 @@ import (
 	"gioui.org/text"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
+	"gioui.org/x/explorer"
 	"git.sr.ht/~whereswaldon/watt-wiser/backend"
 )
 
@@ -25,7 +26,7 @@ const (
 type UI struct {
 	mode        widget.Enum
 	chart       ChartData
-	benchmark   Benchmark
+	benchmark   *Benchmark
 	launchBtn   widget.Clickable
 	explorerBtn widget.Clickable
 	launching   bool
@@ -34,7 +35,7 @@ type UI struct {
 	th *material.Theme
 }
 
-func NewUI(ws backend.WindowState) *UI {
+func NewUI(ws backend.WindowState, expl *explorer.Explorer) *UI {
 	th := material.NewTheme()
 	th.Shaper = text.NewShaper(text.WithCollection(gofont.Collection()), text.NoSystemFonts())
 	return &UI{
@@ -42,9 +43,7 @@ func NewUI(ws backend.WindowState) *UI {
 		mode: widget.Enum{
 			Value: modeBenchmark,
 		},
-		benchmark: Benchmark{
-			ws: ws,
-		},
+		benchmark: NewBenchmark(ws, expl),
 	}
 }
 

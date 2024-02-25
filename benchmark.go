@@ -2,11 +2,14 @@ package main
 
 import (
 	"log"
+	"os"
 	"time"
 
 	"gioui.org/layout"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
+	"gioui.org/x/component"
+	"gioui.org/x/explorer"
 	"git.sr.ht/~gioverse/skel/stream"
 	"git.sr.ht/~whereswaldon/watt-wiser/backend"
 )
@@ -43,6 +46,7 @@ func (b benchmarkStatus) String() string {
 
 type Benchmark struct {
 	commandEditor widget.Editor
+	chooseFileBtn widget.Clickable
 	startBtn      widget.Clickable
 	commandName   string
 	ws            backend.WindowState
@@ -50,6 +54,15 @@ type Benchmark struct {
 	benchmarkStream *stream.Stream[backend.BenchmarkData]
 	bd              backend.BenchmarkData
 	status          benchmarkStatus
+	explorer        *explorer.Explorer
+	table           component.GridState
+}
+
+func NewBenchmark(ws backend.WindowState, expl *explorer.Explorer) *Benchmark {
+	return &Benchmark{
+		ws:       ws,
+		explorer: expl,
+	}
 }
 
 func (b *Benchmark) Update(gtx C) {
@@ -65,6 +78,18 @@ func (b *Benchmark) Update(gtx C) {
 	}
 	if b.startBtn.Clicked(gtx) {
 		b.runCommand(b.commandName)
+	}
+	if b.chooseFileBtn.Clicked(gtx) {
+		f, err := b.explorer.ChooseFile()
+		if err != nil {
+			log.Printf("failed browsing for file: %v", err)
+		} else {
+			if osFile, ok := f.(*os.File); !ok {
+				log.Printf("selected file of unexpected type: %T", f)
+			} else {
+				b.commandEditor.SetText(osFile.Name())
+			}
+		}
 	}
 	data, isNew := b.benchmarkStream.ReadNew(gtx)
 	if isNew {
@@ -97,11 +122,67 @@ func (b *Benchmark) runCommand(cmd string) {
 
 func (b *Benchmark) Layout(gtx C, th *material.Theme) D {
 	return layout.Flex{
-		Axis:    layout.Vertical,
-		Spacing: layout.SpaceAround,
+		Axis: layout.Vertical,
 	}.Layout(gtx,
-		layout.Rigid(material.Editor(th, &b.commandEditor, "command").Layout),
+		layout.Rigid(func(gtx C) D {
+			return layout.Flex{}.Layout(gtx,
+				layout.Flexed(1, material.Editor(th, &b.commandEditor, "command").Layout),
+				layout.Rigid(material.Button(th, &b.chooseFileBtn, "Browse").Layout),
+			)
+		}),
 		layout.Rigid(material.Button(th, &b.startBtn, "Start").Layout),
-		layout.Rigid(material.Body1(th, b.status.String()).Layout),
+		layout.Rigid(func(gtx C) D {
+			l := material.Body1(th, b.status.String())
+			if b.bd.Err != nil {
+				l.Text += " " + b.bd.Err.Error()
+			}
+			return l.Layout(gtx)
+		}),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			tbl := component.Table(th, &b.table)
+			const (
+				rows = 3
+				cols = 2
+			)
+			return tbl.Layout(gtx, rows, cols, func(axis layout.Axis, index, constraint int) int {
+				if axis == layout.Vertical {
+					return min(gtx.Dp(20), constraint)
+				}
+				return constraint / rows
+			},
+				func(gtx layout.Context, index int) layout.Dimensions {
+					switch index {
+					case 0:
+						return material.Body1(th, "Phase Name").Layout(gtx)
+					case 1:
+						return material.Body1(th, "Watts").Layout(gtx)
+					}
+					return D{}
+				},
+				func(gtx layout.Context, row, col int) layout.Dimensions {
+					switch col {
+					case 0:
+						switch row {
+						case 0:
+							return material.Body1(th, "Pre Baseline").Layout(gtx)
+						case 1:
+							return material.Body1(th, "Post Baseline").Layout(gtx)
+						case 2:
+							return material.Body1(th, "Application Execution").Layout(gtx)
+						}
+					case 1:
+						switch row {
+						case 0:
+							return material.Body1(th, "Pre Baseline").Layout(gtx)
+						case 1:
+							return material.Body1(th, "Post Baseline").Layout(gtx)
+						case 2:
+							return material.Body1(th, "Application Execution").Layout(gtx)
+						}
+					}
+					return D{}
+				},
+			)
+		}),
 	)
 }
