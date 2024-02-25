@@ -25,7 +25,8 @@ const (
 // UI is responsible for holding the state of and drawing the top-level UI.
 type UI struct {
 	mode        widget.Enum
-	chart       ChartData
+	ds          Dataset
+	chart       *ChartData
 	benchmark   *Benchmark
 	launchBtn   widget.Clickable
 	explorerBtn widget.Clickable
@@ -38,13 +39,15 @@ type UI struct {
 func NewUI(ws backend.WindowState, expl *explorer.Explorer) *UI {
 	th := material.NewTheme()
 	th.Shaper = text.NewShaper(text.WithCollection(gofont.Collection()), text.NoSystemFonts())
-	return &UI{
+	ui := &UI{
 		th: th,
 		mode: widget.Enum{
 			Value: modeBenchmark,
 		},
-		benchmark: NewBenchmark(ws, expl),
 	}
+	ui.chart = NewChart(&ui.ds)
+	ui.benchmark = NewBenchmark(ws, expl, &ui.ds)
+	return ui
 }
 
 type (
@@ -66,9 +69,9 @@ func (LaunchSensorsRequest) isUIRequest() {}
 func (ui *UI) Insert(sample inputData) {
 	switch sample.Kind {
 	case kindHeadings:
-		ui.chart.Headings = sample.Headings
+		ui.ds.Headings = sample.Headings
 	case kindSample:
-		ui.chart.Insert(sample.Sample)
+		ui.ds.Insert(sample.Sample)
 	}
 }
 
@@ -100,7 +103,7 @@ func (ui *UI) Layout(gtx C) D {
 			break
 		}
 	}
-	if ui.chart.Initialized() {
+	if ui.ds.Initialized() {
 		if ui.mode.Value == modeMonitor {
 			return ui.chart.Layout(gtx, ui.th)
 		} else {

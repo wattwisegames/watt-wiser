@@ -44,6 +44,7 @@ type timeslice struct {
 }
 
 type ChartData struct {
+	*Dataset
 	DomainMin    int64
 	DomainMax    int64
 	Series       []Series
@@ -68,38 +69,11 @@ type ChartData struct {
 	isHovered bool
 }
 
-func (c *ChartData) Initialized() bool {
-	return len(c.Headings) != 0 && len(c.Series) != 0
-}
-
-func (c *ChartData) SetHeadings(headings []string) {
-	c.Headings = headings
-}
-
-func (c *ChartData) Insert(sample Sample) {
-	if len(c.Series) == 0 {
-		c.DomainMin = sample.StartTimestampNS
-		c.DomainMax = sample.StartTimestampNS
-		c.Series = make([]Series, len(sample.Data))
-		c.Enabled = make([]*widget.Bool, len(sample.Data))
-		c.seriesSlices = make([][]timeslice, len(sample.Data))
-		for i := range c.Enabled {
-			c.Enabled[i] = new(widget.Bool)
-			c.Enabled[i].Value = true
-		}
-		c.nsPerDp = 10_000_000 // ns/Dp
+func NewChart(ds *Dataset) *ChartData {
+	return &ChartData{
+		Dataset: ds,
+		nsPerDp: 10_000_000,
 	}
-	for i, datum := range sample.Data {
-		// RangeMin should probably always be zero, no matter what the sensors say. None of the
-		// quantities we're measuring can actually be less than zero.
-		//c.RangeMin = min(datum, c.RangeMin)
-		if datum < 0 {
-			datum = 0
-		}
-		c.Series[i].Insert(sample.StartTimestampNS, sample.EndTimestampNS, datum)
-	}
-	c.DomainMin = min(sample.StartTimestampNS, c.DomainMin)
-	c.DomainMax = max(sample.StartTimestampNS, c.DomainMax)
 }
 
 var colors = []color.NRGBA{
