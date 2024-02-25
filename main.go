@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/csv"
 	"errors"
 	"flag"
@@ -16,12 +17,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"gioui.org/app"
-	"gioui.org/io/system"
-	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/x/explorer"
+	"git.sr.ht/~gioverse/skel/stream"
+	"git.sr.ht/~whereswaldon/watt-wiser/backend"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -87,20 +89,32 @@ Flags:
 			source = f
 			watcher.Add(f.Name())
 		}
+		ctx, cancel := context.WithCancel(context.Background())
+		mutator := stream.NewMutator(ctx, time.Second)
+
+		bundle := backend.NewBundle(mutator)
 
 		samplesChan := make(chan inputData, 1024)
 		w := app.NewWindow(app.Title("Watt Wiser"))
 		go func() {
-			err := loop(w, watcher, samplesChan)
+			err := loop(w, bundle, watcher, samplesChan)
 			if traceInto != "" {
 				trace.Stop()
 				f.Close()
 				pprof.StopCPUProfile()
 			}
+			exitStatus := 0
 			if err != nil {
-				log.Fatal(err)
+				exitStatus = 1
+				log.Println(err)
 			}
-			os.Exit(0)
+			err = mutator.Shutdown()
+			if err != nil {
+				exitStatus = 1
+				log.Println(err)
+			}
+			cancel()
+			os.Exit(exitStatus)
 		}()
 
 		readSource(source, watcher, samplesChan)
@@ -220,7 +234,7 @@ func launchSensors() (*exec.Cmd, io.ReadCloser, error) {
 
 // loop runs the top-level application event loop, connecting a UI instance to sources of data
 // and ensuring that the UI is notified of new data.
-func loop(w *app.Window, watcher *fsnotify.Watcher, samples chan inputData) error {
+func loop(w *app.Window, bundle backend.Bundle, watcher *fsnotify.Watcher, samples chan inputData) error {
 	expl := explorer.NewExplorer(w)
 	var ops op.Ops
 	var dataMutex sync.Mutex
@@ -230,7 +244,11 @@ func loop(w *app.Window, watcher *fsnotify.Watcher, samples chan inputData) erro
 		onClose()
 	}()
 
-	ui := NewUI(w)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ws := backend.NewWindowState(ctx, bundle, w)
+
+	ui := NewUI(ws)
 	go func() {
 		for sample := range samples {
 			func() {
@@ -245,10 +263,10 @@ func loop(w *app.Window, watcher *fsnotify.Watcher, samples chan inputData) erro
 		ev := w.NextEvent()
 		expl.ListenEvents(ev)
 		switch ev := ev.(type) {
-		case system.DestroyEvent:
+		case app.DestroyEvent:
 			return ev.Err
-		case system.FrameEvent:
-			gtx := layout.NewContext(&ops, ev)
+		case app.FrameEvent:
+			gtx := app.NewContext(&ops, ev)
 			func() {
 				dataMutex.Lock()
 				defer dataMutex.Unlock()

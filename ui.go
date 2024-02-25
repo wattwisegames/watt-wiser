@@ -3,12 +3,12 @@ package main
 import (
 	"image"
 
-	"gioui.org/app"
 	"gioui.org/font/gofont"
 	"gioui.org/layout"
 	"gioui.org/text"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
+	"git.sr.ht/~whereswaldon/watt-wiser/backend"
 )
 
 type (
@@ -16,9 +16,16 @@ type (
 	D = layout.Dimensions
 )
 
+const (
+	modeMonitor   = "monitor"
+	modeBenchmark = "benchmark"
+)
+
 // UI is responsible for holding the state of and drawing the top-level UI.
 type UI struct {
+	mode        widget.Enum
 	chart       ChartData
+	benchmark   Benchmark
 	launchBtn   widget.Clickable
 	explorerBtn widget.Clickable
 	launching   bool
@@ -27,11 +34,17 @@ type UI struct {
 	th *material.Theme
 }
 
-func NewUI(w *app.Window) *UI {
+func NewUI(ws backend.WindowState) *UI {
 	th := material.NewTheme()
 	th.Shaper = text.NewShaper(text.WithCollection(gofont.Collection()), text.NoSystemFonts())
 	return &UI{
 		th: th,
+		mode: widget.Enum{
+			Value: modeBenchmark,
+		},
+		benchmark: Benchmark{
+			ws: ws,
+		},
 	}
 }
 
@@ -63,6 +76,13 @@ func (ui *UI) Insert(sample inputData) {
 // Update the state of the UI and generate events. Must be called until the second parameter
 // (indicating the presence/absence of an event) returns false each frame.
 func (ui *UI) Update(gtx C) (UIRequest, bool) {
+	_ = ui.mode.Update(gtx)
+	switch ui.mode.Value {
+	case modeMonitor:
+		ui.chart.Update(gtx)
+	case modeBenchmark:
+		ui.benchmark.Update(gtx)
+	}
 	if !ui.launching && ui.launchBtn.Clicked(gtx) {
 		ui.launching = true
 		return LaunchSensorsRequest{}, true
@@ -82,7 +102,11 @@ func (ui *UI) Layout(gtx C) D {
 		}
 	}
 	if ui.chart.Initialized() {
-		return ui.chart.Layout(gtx, ui.th)
+		if ui.mode.Value == modeMonitor {
+			return ui.chart.Layout(gtx, ui.th)
+		} else {
+			return ui.benchmark.Layout(gtx, ui.th)
+		}
 	}
 	l := material.Body1(ui.th, "No data yet.")
 	return layout.Flex{

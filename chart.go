@@ -11,6 +11,7 @@ import (
 
 	"gioui.org/f32"
 	"gioui.org/gesture"
+	"gioui.org/io/event"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -202,7 +203,14 @@ func (c *ChartData) Update(gtx C) {
 		c.xOffset = 0
 	}
 	c.Stacked.Update(gtx)
-	for _, ev := range gtx.Events(c) {
+	for {
+		ev, ok := gtx.Event(pointer.Filter{
+			Target: c,
+			Kinds:  pointer.Enter | pointer.Leave | pointer.Move,
+		})
+		if !ok {
+			break
+		}
 		switch ev := ev.(type) {
 		case pointer.Event:
 			switch ev.Kind {
@@ -460,13 +468,13 @@ func (c *ChartData) layoutControls(gtx C, th *material.Theme) D {
 }
 
 func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, domainMax int64, pxPerWatt int, rangeMin, rangeMax float64) {
-	dist := c.zoom.Update(gtx.Metric, gtx.Queue, gtx.Now, gesture.Vertical)
+	dist := c.zoom.Update(gtx.Metric, gtx.Source, gtx.Now, gesture.Vertical, image.Rect(0, -1e6, 0, 1e6))
 	if dist != 0 {
 		proportion := 1 + float64(dist)/float64(gtx.Constraints.Max.Y)
 		c.nsPerDp = max(int64(math.Round(float64(c.nsPerDp)*proportion)), 1)
 	}
 	var pannedNS int64
-	dist = c.pan.Update(gtx.Metric, gtx.Queue, gtx.Now, gesture.Horizontal)
+	dist = c.pan.Update(gtx.Metric, gtx.Source, gtx.Now, gesture.Horizontal, image.Rect(-1e6, 0, 1e6, 0))
 	if dist != 0 {
 		pannedNS += int64(gtx.Metric.PxToDp(dist) * unit.Dp(c.nsPerDp))
 	}
@@ -505,12 +513,9 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 		return layout.Stack{Alignment: layout.S}.Layout(gtx,
 			layout.Stacked(func(gtx layout.Context) layout.Dimensions {
 				macro := op.Record(gtx.Ops)
-				c.pan.Add(gtx.Ops, image.Rect(-1e6, 0, 1e6, 0))
-				c.zoom.Add(gtx.Ops, image.Rect(0, -1e6, 0, 1e6))
-				pointer.InputOp{
-					Tag:   c,
-					Kinds: pointer.Enter | pointer.Leave | pointer.Move,
-				}.Add(gtx.Ops)
+				c.pan.Add(gtx.Ops)
+				c.zoom.Add(gtx.Ops)
+				event.Op(gtx.Ops, c)
 				// Draw grid underneath plot.
 				c.layoutYAxisGrid(gtx, maxY, pxPerWatt)
 				if !c.Stacked.Value {
