@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"time"
 
@@ -29,6 +30,8 @@ func (b *Benchmark) Run(commandName string, baselineDur time.Duration) (mutation
 		go func() {
 			defer close(out)
 			cmd := exec.CommandContext(ctx, commandName)
+			cmd.Stderr = os.Stderr
+			cmd.Stdout = os.Stdout
 			currentData := BenchmarkData{
 				PreBaselineStart: time.Now(),
 			}
