@@ -63,8 +63,7 @@ Flags:
 			if err != nil {
 				log.Printf("failed opening %q, falling back to stdin: %v", flag.Arg(0), err)
 			}
-			defer f.Close()
-			bundle.Datasource.LoadFromFile(expl)
+			bundle.Datasource.LoadFromStream(f)
 		}
 		go func() {
 			err := loop(w, expl, bundle)
