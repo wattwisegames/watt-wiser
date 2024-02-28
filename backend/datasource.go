@@ -92,6 +92,10 @@ func (d *Datasource) LoadFromFile(expl *explorer.Explorer) {
 		})
 		return
 	}
+	d.LoadFromStream(file)
+}
+
+func (d *Datasource) LoadFromStream(file io.ReadCloser) {
 	if f, ok := file.(interface{ Name() string }); ok {
 		d.watcher.Add(f.Name())
 	}
@@ -156,13 +160,21 @@ func launchSensors(ctx context.Context) (io.ReadCloser, error) {
 	return output, nil
 }
 
+func (d *Datasource) setError(err error) {
+	d.statusSource.Update(func(oldState Status) Status {
+		oldState.Err = err
+		return oldState
+	})
+}
+
 func (d *Datasource) readSource(source io.Reader) {
 	bufRead := NewLineReader(source)
 	csvReader := csv.NewReader(bufRead)
 	csvReader.TrimLeadingSpace = true
 	headings, err := csvReader.Read()
 	if err != nil {
-		log.Fatalf("could not read csv headings: %v", err)
+		d.setError(err)
+		return
 	}
 	relevantIndices := make([]int, 2, len(headings))
 	relevantIndices[0] = 0
