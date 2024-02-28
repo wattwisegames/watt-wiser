@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"fmt"
 
 	"gioui.org/app"
 	"git.sr.ht/~gioverse/skel/stream"
@@ -20,11 +21,17 @@ func NewWindowState(ctx context.Context, bundle Bundle, win *app.Window) WindowS
 }
 
 type Bundle struct {
-	Benchmark *Benchmark
+	Benchmark  *Benchmark
+	Datasource *Datasource
 }
 
-func NewBundle(mutator *stream.Mutator) Bundle {
-	return Bundle{
-		Benchmark: NewBenchmark(mutator),
+func NewBundle(appCtx context.Context, mutator *stream.Mutator) (Bundle, error) {
+	ds, err := NewDatasource(appCtx, mutator)
+	if err != nil {
+		return Bundle{}, fmt.Errorf("failed constructing bundle: %w", err)
 	}
+	return Bundle{
+		Benchmark:  NewBenchmark(mutator),
+		Datasource: ds,
+	}, nil
 }

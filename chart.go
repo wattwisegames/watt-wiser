@@ -45,11 +45,7 @@ type timeslice struct {
 
 type ChartData struct {
 	*Dataset
-	DomainMin    int64
-	DomainMax    int64
-	Series       []Series
 	seriesSlices [][]timeslice
-	Headings     []string
 	Enabled      []*widget.Bool
 	Stacked      widget.Bool
 	zoom         gesture.Scroll
@@ -171,6 +167,12 @@ func (c *ChartData) layoutYAxisLabels(gtx C, th *material.Theme, pxPerWatt int, 
 }
 
 func (c *ChartData) Update(gtx C) {
+	for len(c.Enabled) < len(c.Series) {
+		c.Enabled = append(c.Enabled, &widget.Bool{Value: true})
+	}
+	for len(c.seriesSlices) < len(c.Series) {
+		c.seriesSlices = append(c.seriesSlices, nil)
+	}
 	if c.pauseBtn.Clicked(gtx) {
 		c.paused = !c.paused
 		c.xOrigin = c.DomainMax + c.xOffset

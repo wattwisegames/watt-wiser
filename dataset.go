@@ -1,5 +1,7 @@
 package main
 
+import "git.sr.ht/~whereswaldon/watt-wiser/backend"
+
 type Dataset struct {
 	DomainMin int64
 	DomainMax int64
@@ -15,7 +17,7 @@ func (d *Dataset) SetHeadings(headings []string) {
 	d.Headings = headings
 }
 
-func (c *Dataset) Insert(sample Sample) {
+func (c *Dataset) Insert(sample backend.Sample) {
 	if len(c.Series) == 0 {
 		c.DomainMin = sample.StartTimestampNS
 		c.DomainMax = sample.StartTimestampNS
