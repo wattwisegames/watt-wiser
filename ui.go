@@ -2,9 +2,12 @@ package main
 
 import (
 	"image"
+	"image/color"
 
 	"gioui.org/font/gofont"
 	"gioui.org/layout"
+	"gioui.org/op/clip"
+	"gioui.org/op/paint"
 	"gioui.org/text"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
@@ -85,6 +88,10 @@ func (ui *UI) Update(gtx C) {
 		ui.chart.Update(gtx)
 		ui.benchmark.Update(gtx)
 	}
+	ui.tab.Update(gtx)
+	if ui.status.Err != nil {
+		ui.sensorsErr = ui.status.Err.Error()
+	}
 	if !ui.launching && ui.launchBtn.Clicked(gtx) {
 		ui.launching = true
 		ui.ws.Bundle.Datasource.LaunchSensors()
@@ -94,16 +101,79 @@ func (ui *UI) Update(gtx C) {
 	}
 }
 
-// Layout the UI into the provided context.
-func (ui *UI) Layout(gtx C) D {
-	ui.Update(gtx)
-	if ui.ds.Initialized() {
-		if ui.tab.Value == tabMonitor {
-			return ui.chart.Layout(gtx, ui.th)
-		} else {
-			return ui.benchmark.Layout(gtx, ui.th)
-		}
+type TabStyle struct {
+	state  *widget.Enum
+	label  material.LabelStyle
+	border widget.Border
+	inset  layout.Inset
+	value  string
+	fill   color.NRGBA
+}
+
+func Tab(th *material.Theme, state *widget.Enum, value, display string) TabStyle {
+	selected := state.Value == value
+	ts := TabStyle{
+		state: state,
+		label: material.Body1(th, display),
+		inset: layout.UniformInset(2),
+		border: widget.Border{
+			Width: 2,
+			Color: th.ContrastBg,
+		},
+		value: value,
 	}
+	ts.label.Alignment = text.Middle
+	if selected {
+		ts.label.Color = th.ContrastFg
+		ts.fill = th.ContrastBg
+	}
+	return ts
+}
+
+func (t TabStyle) Layout(gtx C) D {
+	return t.inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return t.border.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return t.inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return t.state.Layout(gtx, t.value, func(gtx layout.Context) layout.Dimensions {
+					return layout.Background{}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						paint.FillShape(gtx.Ops, t.fill, clip.Rect{Max: gtx.Constraints.Min}.Op())
+						return D{Size: gtx.Constraints.Min}
+					}, t.label.Layout)
+				})
+			})
+		})
+	})
+}
+
+func (ui *UI) layoutMainArea(gtx C) D {
+	return layout.Flex{
+		Axis: layout.Vertical,
+	}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{}.Layout(gtx,
+				layout.Flexed(1, Tab(ui.th, &ui.tab, tabMonitor, "Monitor").Layout),
+				layout.Flexed(1, Tab(ui.th, &ui.tab, tabBenchmark, "Benchmark").Layout),
+			)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if len(ui.sensorsErr) == 0 {
+				return D{}
+			}
+			l := material.Body1(ui.th, ui.sensorsErr)
+			l.Color = color.NRGBA{R: 150, A: 255}
+			return l.Layout(gtx)
+		}),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			if ui.tab.Value == tabMonitor {
+				return ui.chart.Layout(gtx, ui.th)
+			} else {
+				return ui.benchmark.Layout(gtx, ui.th)
+			}
+		}),
+	)
+}
+
+func (ui *UI) layoutStartScreen(gtx C) D {
 	l := material.Body1(ui.th, "No data yet.")
 	return layout.Flex{
 		Axis:      layout.Vertical,
@@ -130,4 +200,13 @@ func (ui *UI) Layout(gtx C) D {
 			return material.Body2(ui.th, ui.sensorsErr).Layout(gtx)
 		}),
 	)
+}
+
+// Layout the UI into the provided context.
+func (ui *UI) Layout(gtx C) D {
+	ui.Update(gtx)
+	if ui.ds.Initialized() {
+		return ui.layoutMainArea(gtx)
+	}
+	return ui.layoutStartScreen(gtx)
 }
