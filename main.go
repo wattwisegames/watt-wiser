@@ -59,11 +59,20 @@ Flags:
 		w := app.NewWindow(app.Title("Watt Wiser"))
 		expl := explorer.NewExplorer(w)
 		if flag.NArg() > 0 {
-			f, err := os.Open(flag.Arg(0))
-			if err != nil {
-				log.Printf("failed opening %q, falling back to stdin: %v", flag.Arg(0), err)
+			var f io.ReadCloser
+			if flag.Arg(0) == "-" {
+				f = os.Stdin
+			} else {
+				var err error
+				f, err = os.Open(flag.Arg(0))
+				if err != nil {
+					log.Printf("failed opening %q, falling back to stdin: %v", flag.Arg(0), err)
+					f = nil
+				}
 			}
-			bundle.Datasource.LoadFromStream(f)
+			if f != nil {
+				bundle.Datasource.LoadFromStream(f)
+			}
 		}
 		go func() {
 			err := loop(w, expl, bundle)
