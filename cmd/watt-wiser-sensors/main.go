@@ -109,9 +109,6 @@ func main() {
 	fmt.Fprintf(output, "sample start (ns), sample end (ns), ")
 	for _, s := range sensorList {
 		fmt.Fprintf(output, "%s (%s), ", s.Name(), s.Unit())
-		if s.Unit() == sensors.Watts {
-			fmt.Fprintf(output, "integrated %s (%s),", s.Name(), sensors.Joules)
-		}
 	}
 	fmt.Fprintln(output)
 	samples := make([]float64, len(sensorList))
@@ -150,13 +147,9 @@ func main() {
 			if readDuration := readFinishedAt.Sub(lastReadTime); readDuration < sampleRate*2 {
 				// This sample was not interrupted mid-read, so we're good.
 				fmt.Fprintf(output, "%d, %d, ", lastReadTime.UnixNano(), sampleEndTime.UnixNano())
-				sampleInterval := sampleEndTime.Sub(lastReadTime)
-				for chipIdx, chip := range sensorList {
+				for chipIdx := range sensorList {
 					v := samples[chipIdx]
 					fmt.Fprintf(output, "%f, ", v)
-					if chip.Unit() == sensors.Watts {
-						fmt.Fprintf(output, "%f, ", v*sampleInterval.Seconds())
-					}
 				}
 				fmt.Fprintln(output)
 			} else {
