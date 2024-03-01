@@ -57,15 +57,16 @@ Flags:
 	}
 	go func() {
 		w := app.NewWindow(app.Title("Watt Wiser"))
-		if flag.NArg() > 0 {
+		for i := 0; i < flag.NArg(); i++ {
+			arg := flag.Arg(i)
 			var f io.ReadCloser
-			if flag.Arg(0) == "-" {
+			if arg == "-" {
 				f = os.Stdin
 			} else {
 				var err error
-				f, err = os.Open(flag.Arg(0))
+				f, err = os.Open(arg)
 				if err != nil {
-					log.Printf("failed opening %q, falling back to stdin: %v", flag.Arg(0), err)
+					log.Printf("failed opening %q, falling back to stdin: %v", arg, err)
 					f = nil
 				}
 			}

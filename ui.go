@@ -71,7 +71,7 @@ type (
 func (ui *UI) Insert(sample backend.InputData) {
 	switch sample.Kind {
 	case backend.KindHeadings:
-		ui.ds.Headings = sample.Headings
+		ui.ds.SetHeadings(sample.Headings, sample.HeadingSeries)
 	case backend.KindSample:
 		ui.ds.Insert(sample.Sample)
 	}

@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"gioui.org/x/explorer"
 	"git.sr.ht/~gioverse/skel/stream"
@@ -31,7 +32,8 @@ const (
 type InputData struct {
 	Kind InputKind
 	Sample
-	Headings []string
+	Headings      []string
+	HeadingSeries []int
 }
 
 type Sample struct {
@@ -55,11 +57,12 @@ type Status struct {
 }
 
 type Datasource struct {
-	pool         *stream.MutationPool[struct{}, chan any]
-	statusSource *stream.Source[Status, Status]
-	watcher      *fsnotify.Watcher
-	samples      chan InputData
-	appCtx       context.Context
+	pool          *stream.MutationPool[struct{}, chan any]
+	statusSource  *stream.Source[Status, Status]
+	watcher       *fsnotify.Watcher
+	samples       chan InputData
+	appCtx        context.Context
+	seriesCounter atomic.Int32
 }
 
 func NewDatasource(appCtx context.Context, mutator *stream.Mutator) (*Datasource, error) {
@@ -183,24 +186,29 @@ func (d *Datasource) readSource(source io.Reader) {
 	relevantIndices[0] = 0
 	relevantIndices[1] = 1
 	relevantHeadings := make([]string, 0, len(headings))
+	headingSeries := make([]int, 0, len(headings))
 	indexIsEnergy := map[int]bool{}
 	for i, heading := range headings {
 		if i == 0 {
 			continue
 		}
-		if strings.Contains(heading, "(J)") {
+		joules := strings.Contains(heading, "(J)")
+		watts := strings.Contains(heading, "(W)")
+		if joules || watts {
 			relevantIndices = append(relevantIndices, i)
 			relevantHeadings = append(relevantHeadings, heading)
-			indexIsEnergy[i] = true
-		} else if strings.Contains(heading, "(W)") {
-			relevantIndices = append(relevantIndices, i)
-			relevantHeadings = append(relevantHeadings, heading)
-			indexIsEnergy[i] = false
+			headingSeries = append(headingSeries, int(d.seriesCounter.Add(1)))
+			if joules {
+				indexIsEnergy[i] = true
+			} else if watts {
+				indexIsEnergy[i] = false
+			}
 		}
 	}
 	d.samples <- InputData{
-		Kind:     KindHeadings,
-		Headings: relevantHeadings,
+		Kind:          KindHeadings,
+		Headings:      relevantHeadings,
+		HeadingSeries: headingSeries,
 	}
 	// Continously parse the CSV data and send it on the channel.
 readLoop:
