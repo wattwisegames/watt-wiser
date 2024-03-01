@@ -57,7 +57,6 @@ Flags:
 	}
 	go func() {
 		w := app.NewWindow(app.Title("Watt Wiser"))
-		expl := explorer.NewExplorer(w)
 		if flag.NArg() > 0 {
 			var f io.ReadCloser
 			if flag.Arg(0) == "-" {
@@ -75,7 +74,7 @@ Flags:
 			}
 		}
 		go func() {
-			err := loop(w, expl, bundle)
+			err := loop(w, bundle)
 			if traceInto != "" {
 				trace.Stop()
 				f.Close()
@@ -101,7 +100,7 @@ Flags:
 
 // loop runs the top-level application event loop, connecting a UI instance to sources of data
 // and ensuring that the UI is notified of new data.
-func loop(w *app.Window, expl *explorer.Explorer, bundle backend.Bundle) error {
+func loop(w *app.Window, bundle backend.Bundle) error {
 	var ops op.Ops
 	var dataMutex sync.Mutex
 
@@ -109,6 +108,7 @@ func loop(w *app.Window, expl *explorer.Explorer, bundle backend.Bundle) error {
 	defer cancel()
 	ws := backend.NewWindowState(ctx, bundle, w)
 
+	expl := explorer.NewExplorer(w)
 	ui := NewUI(ws, expl)
 	go func() {
 		for sample := range bundle.Datasource.Samples() {
