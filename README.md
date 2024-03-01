@@ -29,7 +29,7 @@ How to install Watt Wiser on supported platforms. macOS is not listed because we
 - Install `xdg-desktop-portal` and at least one implementation of it (such as `xdg-desktop-portal-gnome` or `xdg-desktop-portal-kde`) in order to open trace files with a file picker.
 - Find the latest Watt Wiser release [here](https://github.com/wattwisegames/watt-wiser/releases) and download the tarball file for linux (should end with `linux.tar.xz`).
 - Extract the tarball somewhere.
-- Run `sudo ./watt-wiser-sensors | ./watt-wiser` to visualize the your system. Superuser permissions are required to read the RAPL energy sensors on Linux, as they can be used as a cryptographic side channel.
+- Run `sudo ./watt-wiser-sensors | ./watt-wiser -` to visualize the your system. Superuser permissions are required to read the RAPL energy sensors on Linux, as they can be used as a cryptographic side channel.
 
 ### Linux Packages
 
@@ -38,7 +38,7 @@ How to install Watt Wiser on supported platforms. macOS is not listed because we
   - [`watt-wiser-git`](https://aur.archlinux.org/packages/watt-wiser-git) for graphing statistics collected with `watt-wiser-sensors`, depends on `watt-wiser-sensors`
 
 - Install `xdg-desktop-portal` and at least one implementation of it (such as `xdg-desktop-portal-gnome` or `xdg-desktop-portal-kde`) in order to open trace files with a file picker.
-- Run `sudo ./watt-wiser-sensors | ./watt-wiser` to visualize the your system. Superuser permissions are required to read the RAPL energy sensors on Linux, as they can be used as a cryptographic side channel.
+- Run `sudo ./watt-wiser-sensors | ./watt-wiser -` to visualize the your system. Superuser permissions are required to read the RAPL energy sensors on Linux, as they can be used as a cryptographic side channel.
 
 ### Windows
 
@@ -131,7 +131,7 @@ To run the GUI against a trace, you can run:
 You can also directly pipe sensor data to the GUI:
 
 ```
-sudo ./watt-wiser-sensors | ./watt-wiser
+sudo ./watt-wiser-sensors | ./watt-wiser -
 ```
 
 ## Windows Setup
