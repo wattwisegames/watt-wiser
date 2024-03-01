@@ -52,7 +52,6 @@ type Benchmark struct {
 	chooseFileBtn widget.Clickable
 	disableStart  bool
 	startBtn      widget.Clickable
-	commandName   string
 	ws            backend.WindowState
 	ds            *Dataset
 
@@ -73,18 +72,14 @@ func NewBenchmark(ws backend.WindowState, expl *explorer.Explorer, ds *Dataset) 
 
 func (b *Benchmark) Update(gtx C) {
 	for {
-		ev, ok := b.commandEditor.Update(gtx)
+		_, ok := b.commandEditor.Update(gtx)
 		if !ok {
 			break
-		}
-		switch ev.(type) {
-		case widget.ChangeEvent:
-			b.commandName = b.commandEditor.Text()
 		}
 	}
 	if b.startBtn.Clicked(gtx) {
 		b.disableStart = true
-		b.runCommand(b.commandName)
+		b.runCommand(b.commandEditor.Text())
 	}
 	if b.chooseFileBtn.Clicked(gtx) {
 		f, err := b.explorer.ChooseFile()
@@ -129,6 +124,7 @@ func (b *Benchmark) runCommand(cmd string) {
 }
 
 func (b *Benchmark) Layout(gtx C, th *material.Theme) D {
+	b.Update(gtx)
 	return layout.Flex{
 		Axis: layout.Vertical,
 	}.Layout(gtx,
