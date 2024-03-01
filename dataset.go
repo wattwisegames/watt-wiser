@@ -21,17 +21,11 @@ func (c *Dataset) Insert(sample backend.Sample) {
 	if len(c.Series) == 0 {
 		c.DomainMin = sample.StartTimestampNS
 		c.DomainMax = sample.StartTimestampNS
-		c.Series = make([]Series, len(sample.Data))
 	}
-	for i, datum := range sample.Data {
-		// RangeMin should probably always be zero, no matter what the sensors say. None of the
-		// quantities we're measuring can actually be less than zero.
-		//c.RangeMin = min(datum, c.RangeMin)
-		if datum < 0 {
-			datum = 0
-		}
-		c.Series[i].Insert(sample.StartTimestampNS, sample.EndTimestampNS, datum)
+	for sample.Series >= len(c.Series) {
+		c.Series = append(c.Series, Series{})
 	}
+	c.Series[sample.Series].Insert(sample)
 	c.DomainMin = min(sample.StartTimestampNS, c.DomainMin)
-	c.DomainMax = max(sample.StartTimestampNS, c.DomainMax)
+	c.DomainMax = max(sample.EndTimestampNS, c.DomainMax)
 }

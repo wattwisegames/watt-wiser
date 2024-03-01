@@ -1,8 +1,10 @@
 package main
 
 import (
-	"slices"
 	"sort"
+
+	"git.sr.ht/~whereswaldon/watt-wiser/backend"
+	"git.sr.ht/~whereswaldon/watt-wiser/sensors"
 )
 
 // Series represents one data set in a visualization.
@@ -17,12 +19,22 @@ type Series struct {
 // Insert adds a value at a given timestamp to the series. In the event
 // that the series already contains a value at that time, nothing is added
 // and the method returns false. Otherwise, the method returns true.
-func (s *Series) Insert(startTimestamp, endTimestamp int64, value float64) (inserted bool) {
-	index, found := slices.BinarySearch(s.startTimestamps, startTimestamp)
-	if found {
+func (s *Series) Insert(sample backend.Sample) (inserted bool) {
+	if len(s.endTimestamps) > 0 && s.endTimestamps[len(s.endTimestamps)-1] > sample.StartTimestampNS {
+		// Reject samples with times overlapping the existing data in the series.
 		return false
 	}
-	rate := (value / (float64(endTimestamp-startTimestamp) / 1_000_000_000))
+	var rate float64
+	var quantity float64
+	duration := float64(sample.EndTimestampNS - sample.StartTimestampNS)
+	durationSeconds := duration / 1_000_000_000
+	if sample.Unit == sensors.Joules {
+		rate = (sample.Value / durationSeconds)
+		quantity = sample.Value
+	} else if sample.Unit == sensors.Watts {
+		rate = sample.Value
+		quantity = (sample.Value * duration) / 1_000_000_000
+	}
 
 	if len(s.startTimestamps) < 1 {
 		s.RangeRateMax = rate
@@ -31,11 +43,11 @@ func (s *Series) Insert(startTimestamp, endTimestamp int64, value float64) (inse
 		s.RangeRateMax = max(s.RangeRateMax, rate)
 		s.RangeRateMin = min(s.RangeRateMin, rate)
 	}
-	s.startTimestamps = slices.Insert(s.startTimestamps, index, startTimestamp)
-	s.endTimestamps = slices.Insert(s.endTimestamps, index, endTimestamp)
-	s.values = slices.Insert(s.values, index, value)
+	s.startTimestamps = append(s.startTimestamps, sample.StartTimestampNS)
+	s.endTimestamps = append(s.endTimestamps, sample.EndTimestampNS)
+	s.values = append(s.values, quantity)
 
-	s.Sum += value
+	s.Sum += quantity
 	return true
 }
 

@@ -17,6 +17,7 @@ import (
 
 	"gioui.org/x/explorer"
 	"git.sr.ht/~gioverse/skel/stream"
+	"git.sr.ht/~whereswaldon/watt-wiser/sensors"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -35,7 +36,9 @@ type InputData struct {
 
 type Sample struct {
 	StartTimestampNS, EndTimestampNS int64
-	Data                             []float64
+	Series                           int
+	Value                            float64
+	Unit                             sensors.Unit
 }
 
 type Mode uint8
@@ -180,6 +183,7 @@ func (d *Datasource) readSource(source io.Reader) {
 	relevantIndices[0] = 0
 	relevantIndices[1] = 1
 	relevantHeadings := make([]string, 0, len(headings))
+	indexIsEnergy := map[int]bool{}
 	for i, heading := range headings {
 		if i == 0 {
 			continue
@@ -187,6 +191,11 @@ func (d *Datasource) readSource(source io.Reader) {
 		if strings.Contains(heading, "(J)") {
 			relevantIndices = append(relevantIndices, i)
 			relevantHeadings = append(relevantHeadings, heading)
+			indexIsEnergy[i] = true
+		} else if strings.Contains(heading, "(W)") {
+			relevantIndices = append(relevantIndices, i)
+			relevantHeadings = append(relevantHeadings, heading)
+			indexIsEnergy[i] = false
 		}
 	}
 	d.samples <- InputData{
@@ -208,7 +217,6 @@ readLoop:
 			log.Printf("could not read sensor data: %v", err)
 			return
 		}
-		samples := make([]float64, len(relevantIndices)-2)
 		startNs, err := strconv.ParseInt(rec[0], 10, 64)
 		if err != nil {
 			log.Printf("failed parsing timestamp: %v", err)
@@ -225,15 +233,20 @@ readLoop:
 				log.Printf("failed parsing data[%d]=%q: %v", i, rec[i], err)
 				continue
 			}
-			samples[i-2] = data
-		}
-		d.samples <- InputData{
-			Kind: KindSample,
-			Sample: Sample{
-				StartTimestampNS: startNs,
-				EndTimestampNS:   endNs,
-				Data:             samples,
-			},
+			unit := sensors.Joules
+			if !indexIsEnergy[i] {
+				unit = sensors.Watts
+			}
+			d.samples <- InputData{
+				Kind: KindSample,
+				Sample: Sample{
+					StartTimestampNS: startNs,
+					EndTimestampNS:   endNs,
+					Series:           i - 2,
+					Value:            data,
+					Unit:             unit,
+				},
+			}
 		}
 	}
 }
