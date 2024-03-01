@@ -640,7 +640,6 @@ func (c *ChartData) computeVisible(gtx C, maxY int, domainMin, domainMax int64, 
 	for i, series := range c.Series {
 		if c.Enabled[i].Value {
 			c.seriesSlices[i] = c.seriesSlices[i][:0]
-			c.returnPath = c.returnPath[:0]
 			intervalMean := 0.0
 			for intervalCount := 1; intervalCount <= totalIntervals; intervalCount++ {
 				tsStart := domainMax - (c.nsPerDp * int64(intervalCount))
