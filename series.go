@@ -57,9 +57,9 @@ func (s *Series) Insert(sample backend.Sample) (inserted bool) {
 // interval [timestampB,timestampA) will be returned. If the interval extends
 // beyond the domain of the data, all data return values will be zero and the
 // ok return value will be false.
-func (s *Series) RatesBetween(timestampA, timestampB int64) (maximum, mean, minimum float64, ok bool) {
+func (s *Series) RatesBetween(timestampA, timestampB int64) (maximum, mean, minimum, sum float64, ok bool) {
 	if len(s.startTimestamps) < 1 {
-		return 0, 0, 0, false
+		return 0, 0, 0, 0, false
 	}
 	if timestampB < timestampA {
 		timestampA, timestampB = timestampB, timestampA
@@ -68,7 +68,7 @@ func (s *Series) RatesBetween(timestampA, timestampB int64) (maximum, mean, mini
 		return timestampA < s.endTimestamps[i]
 	})
 	if indexA == len(s.startTimestamps) {
-		return 0, 0, 0, false
+		return 0, 0, 0, 0, false
 	}
 	indexB := sort.Search(len(s.startTimestamps), func(i int) bool {
 		return timestampB < s.endTimestamps[i]
@@ -76,7 +76,7 @@ func (s *Series) RatesBetween(timestampA, timestampB int64) (maximum, mean, mini
 	if indexB == len(s.startTimestamps) {
 		lastEnd := s.endTimestamps[len(s.endTimestamps)-1]
 		if timestampB > lastEnd {
-			return 0, 0, 0, false
+			return 0, 0, 0, 0, false
 		}
 		// If the last timestamp is exactly equal to the end of the final time, then we can proceed.
 		indexB--
@@ -84,9 +84,10 @@ func (s *Series) RatesBetween(timestampA, timestampB int64) (maximum, mean, mini
 	if indexA == indexB {
 		v := s.values[indexA]
 		interval := float64(s.endTimestamps[indexA] - s.startTimestamps[indexA])
+		queryInterval := timestampB - timestampA
 		mean := v / (interval / 1_000_000_000)
 		ok = true
-		return mean, mean, mean, ok
+		return mean, mean, mean, (v * (float64(queryInterval) / interval)), ok
 	}
 	values := s.values[indexA : indexB+1]
 	hasExtrema := false
@@ -109,16 +110,17 @@ func (s *Series) RatesBetween(timestampA, timestampB int64) (maximum, mean, mini
 			interval = float64(querySampleInterval)
 		}
 		mean += v
-		v /= interval / 1_000_000_000
+		rate := v / (interval / 1_000_000_000)
 		if hasExtrema {
-			maximum = max(maximum, v)
-			minimum = min(minimum, v)
+			maximum = max(maximum, rate)
+			minimum = min(minimum, rate)
 		} else {
-			maximum = v
-			minimum = v
+			maximum = rate
+			minimum = rate
 			hasExtrema = true
 		}
 	}
+	sum = mean
 	mean /= (float64(timestampB-timestampA) / 1_000_000_000)
-	return maximum, mean, minimum, true
+	return maximum, mean, minimum, sum, true
 }

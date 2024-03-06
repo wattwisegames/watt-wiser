@@ -645,7 +645,7 @@ func (c *ChartData) computeVisible(gtx C, maxY int, domainMin, domainMax int64, 
 				tsStart := domainMax - (c.nsPerDp * int64(intervalCount))
 				tsEnd := tsStart + c.nsPerDp
 				var ok bool
-				_, intervalMean, _, ok = series.RatesBetween(tsStart, tsEnd)
+				_, intervalMean, _, _, ok = series.RatesBetween(tsStart, tsEnd)
 				if !ok {
 					continue
 				}

@@ -161,8 +161,8 @@ func (b *Benchmark) computeResults() {
 		}
 		sectionOffset := section * sectionStride
 		for i, s := range b.ds.Series {
-			max, mean, min, _ := s.RatesBetween(start, end)
-			values[sectionOffset+i*cols+0] = 0
+			max, mean, min, sum, _ := s.RatesBetween(start, end)
+			values[sectionOffset+i*cols+0] = sum
 			values[sectionOffset+i*cols+1] = min
 			values[sectionOffset+i*cols+2] = max
 			values[sectionOffset+i*cols+3] = mean
