@@ -250,7 +250,7 @@ readLoop:
 				Sample: Sample{
 					StartTimestampNS: startNs,
 					EndTimestampNS:   endNs,
-					Series:           i - 2,
+					Series:           headingSeries[i-2],
 					Value:            data,
 					Unit:             unit,
 				},
