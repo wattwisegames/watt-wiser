@@ -3,11 +3,14 @@ package main
 import (
 	"fmt"
 	"image"
+	"image/color"
 	"log"
 	"os"
 	"time"
 
 	"gioui.org/layout"
+	"gioui.org/op/clip"
+	"gioui.org/op/paint"
 	"gioui.org/text"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
@@ -159,83 +162,128 @@ func (b *Benchmark) Layout(gtx C, th *material.Theme) D {
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			gtx.Constraints.Min.Y = 0
 			tbl := component.Table(th, &b.table)
-			rows := len(b.ds.Series)
-			cols := 1 + 4*3 // energy, minW, maxW, meanW for each baseline and runtime
+			sectionsCount := 3
+			rows := len(b.ds.Series) * sectionsCount
+			cols := 4 // energy, minW, maxW, meanW for each baseline and runtime
+			prefixCols := 2
 			values := make([]float64, rows*cols)
-			for i, s := range b.ds.Series {
-				max, mean, min, _ := s.RatesBetween(b.bd.PreBaselineStart.UnixNano(), b.bd.PreBaselineEnd.UnixNano())
-				values[i*cols+0] = 0
-				values[i*cols+1] = min
-				values[i*cols+2] = max
-				values[i*cols+3] = mean
-				max, mean, min, _ = s.RatesBetween(b.bd.PostBaselineStart.UnixNano(), b.bd.PostBaselineEnd.UnixNano())
-				values[i*cols+4] = 0
-				values[i*cols+5] = min
-				values[i*cols+6] = max
-				values[i*cols+7] = mean
-				max, mean, min, _ = s.RatesBetween(b.bd.PreBaselineEnd.UnixNano(), b.bd.PostBaselineStart.UnixNano())
-				values[i*cols+8] = 0
-				values[i*cols+9] = min
-				values[i*cols+10] = max
-				values[i*cols+11] = mean
+			sectionStride := len(b.ds.Series) * cols
+			for section := 0; section < sectionsCount; section++ {
+				var start, end int64
+				switch section {
+				case 0:
+					start = b.bd.PreBaselineStart.UnixNano()
+					end = b.bd.PreBaselineEnd.UnixNano()
+				case 2:
+					start = b.bd.PostBaselineStart.UnixNano()
+					end = b.bd.PostBaselineEnd.UnixNano()
+				case 1:
+					start = b.bd.PreBaselineEnd.UnixNano()
+					end = b.bd.PostBaselineStart.UnixNano()
+				}
+				sectionOffset := section * sectionStride
+				for i, s := range b.ds.Series {
+					max, mean, min, _ := s.RatesBetween(start, end)
+					values[sectionOffset+i*cols+0] = 0
+					values[sectionOffset+i*cols+1] = min
+					values[sectionOffset+i*cols+2] = max
+					values[sectionOffset+i*cols+3] = mean
+				}
 			}
-			longest := material.Body1(th, "Post sum(W)")
+			longest := material.Body1(th, "Post Baseline")
 			origConstraints := gtx.Constraints
 			gtx.Constraints.Min = image.Point{}
 			longestDims, _ := rec(gtx, func(gtx C) D {
 				return layout.UniformInset(2).Layout(gtx, longest.Layout)
 			})
+			flexedColumns := 1
+			rigidColumns := (cols + prefixCols) - flexedColumns
 			gtx.Constraints = origConstraints
-			return tbl.Layout(gtx, rows, cols, func(axis layout.Axis, index, constraint int) int {
+			return tbl.Layout(gtx, rows, cols+prefixCols, func(axis layout.Axis, index, constraint int) int {
 				if axis == layout.Vertical {
 					return min(longestDims.Size.Y, constraint)
 				}
-				if index == 0 {
-					return constraint / 3
+				if index == 1 {
+					return (constraint - (longestDims.Size.X * rigidColumns)) / flexedColumns
 				}
 				return longestDims.Size.X
 			},
 				func(gtx layout.Context, index int) layout.Dimensions {
-					if index == 0 {
-						return material.Body1(th, "Sensor Name").Layout(gtx)
-					}
-					var label string
-					switch mod := (index - 1) % 4; mod {
-					case 0:
-						label = "sum(J)"
-					case 1:
-						label = "min(W)"
-					case 2:
-						label = "max(W)"
-					case 3:
-						label = "avg(W)"
-					}
-					var phase string
-					switch mod := (index - 1) / 4; mod {
-					case 0:
-						phase = "Pre"
-					case 1:
-						phase = "Post"
-					case 2:
-						phase = "Run"
-					}
-					l := material.Body1(th, phase+" "+label)
-					l.MaxLines = 1
-					l.Alignment = text.End
-					return l.Layout(gtx)
+					return layout.Background{}.Layout(gtx,
+						func(gtx layout.Context) layout.Dimensions {
+							paint.FillShape(gtx.Ops, th.ContrastBg, clip.Rect{Max: gtx.Constraints.Min}.Op())
+							return D{Size: gtx.Constraints.Min}
+						},
+						func(gtx layout.Context) layout.Dimensions {
+							l := material.Body1(th, "")
+							l.MaxLines = 1
+							l.Color = th.ContrastFg
+							if index == 0 {
+								l.Text = "Phase"
+							} else if index == 1 {
+								l.Text = "Sensor Name"
+							} else {
+								switch index - prefixCols {
+								case 0:
+									l.Text = "sum(J)"
+								case 1:
+									l.Text = "min(W)"
+								case 2:
+									l.Text = "max(W)"
+								case 3:
+									l.Text = "avg(W)"
+								}
+								l.Alignment = text.End
+							}
+							return l.Layout(gtx)
+						},
+					)
 				},
 				func(gtx layout.Context, row, col int) layout.Dimensions {
-					if col == 0 {
-						l := material.Body1(th, b.ds.Headings[row])
-						l.MaxLines = 1
-						return l.Layout(gtx)
-					}
-					col -= 1
-					val := values[row*cols+col]
-					l := material.Body1(th, fmt.Sprintf("%0.2f", val))
-					l.Alignment = text.End
-					l.MaxLines = 1
-					return l.Layout(gtx)
+					phase := row / len(b.ds.Series)
+					return layout.Background{}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						var c color.NRGBA
+						c = color.NRGBA{R: 100, G: 100, B: 100, A: 0}
+						switch phase {
+						case 1:
+							c.A = 100
+							c.G += 50
+							c.R -= 50
+							c.B -= 50
+						}
+						if row&1 == 0 {
+							c.A += 50
+						}
+						paint.FillShape(gtx.Ops, c, clip.Rect{Max: gtx.Constraints.Min}.Op())
+						return D{Size: gtx.Constraints.Min}
+					},
+						func(gtx layout.Context) layout.Dimensions {
+							if col == 0 {
+								var label string
+								switch phase {
+								case 0:
+									label = "Pre Baseline"
+								case 2:
+									label = "Post Baseline"
+								case 1:
+									label = "Benchmark"
+								}
+								l := material.Body1(th, label)
+								l.MaxLines = 1
+								return l.Layout(gtx)
+							} else if col == 1 {
+								l := material.Body1(th, b.ds.Headings[row%len(b.ds.Series)])
+								l.MaxLines = 1
+								return l.Layout(gtx)
+							}
+							col -= prefixCols
+							val := values[row*cols+col]
+							l := material.Body1(th, fmt.Sprintf("%0.2f", val))
+							l.Alignment = text.End
+							l.MaxLines = 1
+							return l.Layout(gtx)
+						},
+					)
 				},
 			)
 		}),
