@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"log"
 	"os"
+	"slices"
 	"time"
 
 	"gioui.org/layout"
@@ -50,6 +51,14 @@ func (b benchmarkStatus) String() string {
 	}
 }
 
+type ResultSet struct {
+	bd        backend.BenchmarkData
+	stats     []float64
+	series    []string
+	statsRows int
+	statsCols int
+}
+
 type Benchmark struct {
 	commandEditor widget.Editor
 	chooseFileBtn widget.Clickable
@@ -57,6 +66,8 @@ type Benchmark struct {
 	startBtn      widget.Clickable
 	ws            backend.WindowState
 	ds            *Dataset
+	results       ResultSet
+	hasResults    bool
 
 	benchmarkStream *stream.Stream[backend.BenchmarkData]
 	bd              backend.BenchmarkData
@@ -103,6 +114,7 @@ func (b *Benchmark) Update(gtx C) {
 		case b.bd.PostBaselineEnd != (time.Time{}):
 			b.status = statusDone
 			b.disableStart = false
+			b.computeResults()
 		case b.bd.PostBaselineStart != (time.Time{}):
 			b.status = statusRunningPostBaseline
 		case b.bd.PreBaselineEnd != (time.Time{}):
@@ -124,6 +136,45 @@ func (b *Benchmark) runCommand(cmd string) {
 		return
 	}
 	b.benchmarkStream = stream.New(b.ws.Controller, mut.Stream)
+}
+
+func (b *Benchmark) computeResults() {
+	series := slices.Clone(b.ds.Headings)
+	sectionsCount := 3
+	rows := len(series) * sectionsCount
+	cols := 4 // energy, minW, maxW, meanW for each baseline and runtime
+	values := make([]float64, rows*cols)
+	sectionStride := len(series) * cols
+	for section := 0; section < sectionsCount; section++ {
+		var start, end int64
+		switch section {
+		case 0:
+			start = b.bd.PreBaselineStart.UnixNano()
+			end = b.bd.PreBaselineEnd.UnixNano()
+		case 2:
+			start = b.bd.PostBaselineStart.UnixNano()
+			end = b.bd.PostBaselineEnd.UnixNano()
+		case 1:
+			start = b.bd.PreBaselineEnd.UnixNano()
+			end = b.bd.PostBaselineStart.UnixNano()
+		}
+		sectionOffset := section * sectionStride
+		for i, s := range b.ds.Series {
+			max, mean, min, _ := s.RatesBetween(start, end)
+			values[sectionOffset+i*cols+0] = 0
+			values[sectionOffset+i*cols+1] = min
+			values[sectionOffset+i*cols+2] = max
+			values[sectionOffset+i*cols+3] = mean
+		}
+	}
+	b.results = ResultSet{
+		statsRows: rows,
+		statsCols: cols,
+		series:    series,
+		stats:     values,
+		bd:        b.bd,
+	}
+	b.hasResults = true
 }
 
 func (b *Benchmark) Layout(gtx C, th *material.Theme) D {
@@ -160,36 +211,12 @@ func (b *Benchmark) Layout(gtx C, th *material.Theme) D {
 			)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if !b.hasResults {
+				return D{}
+			}
 			gtx.Constraints.Min.Y = 0
 			tbl := component.Table(th, &b.table)
-			sectionsCount := 3
-			rows := len(b.ds.Series) * sectionsCount
-			cols := 4 // energy, minW, maxW, meanW for each baseline and runtime
 			prefixCols := 2
-			values := make([]float64, rows*cols)
-			sectionStride := len(b.ds.Series) * cols
-			for section := 0; section < sectionsCount; section++ {
-				var start, end int64
-				switch section {
-				case 0:
-					start = b.bd.PreBaselineStart.UnixNano()
-					end = b.bd.PreBaselineEnd.UnixNano()
-				case 2:
-					start = b.bd.PostBaselineStart.UnixNano()
-					end = b.bd.PostBaselineEnd.UnixNano()
-				case 1:
-					start = b.bd.PreBaselineEnd.UnixNano()
-					end = b.bd.PostBaselineStart.UnixNano()
-				}
-				sectionOffset := section * sectionStride
-				for i, s := range b.ds.Series {
-					max, mean, min, _ := s.RatesBetween(start, end)
-					values[sectionOffset+i*cols+0] = 0
-					values[sectionOffset+i*cols+1] = min
-					values[sectionOffset+i*cols+2] = max
-					values[sectionOffset+i*cols+3] = mean
-				}
-			}
 			longest := material.Body1(th, "Post Baseline")
 			origConstraints := gtx.Constraints
 			gtx.Constraints.Min = image.Point{}
@@ -197,9 +224,9 @@ func (b *Benchmark) Layout(gtx C, th *material.Theme) D {
 				return layout.UniformInset(2).Layout(gtx, longest.Layout)
 			})
 			flexedColumns := 1
-			rigidColumns := (cols + prefixCols) - flexedColumns
+			rigidColumns := (b.results.statsCols + prefixCols) - flexedColumns
 			gtx.Constraints = origConstraints
-			return tbl.Layout(gtx, rows, cols+prefixCols, func(axis layout.Axis, index, constraint int) int {
+			return tbl.Layout(gtx, b.results.statsRows, b.results.statsCols+prefixCols, func(axis layout.Axis, index, constraint int) int {
 				if axis == layout.Vertical {
 					return min(longestDims.Size.Y, constraint)
 				}
@@ -277,7 +304,7 @@ func (b *Benchmark) Layout(gtx C, th *material.Theme) D {
 								return l.Layout(gtx)
 							}
 							col -= prefixCols
-							val := values[row*cols+col]
+							val := b.results.stats[row*b.results.statsCols+col]
 							l := material.Body1(th, fmt.Sprintf("%0.2f", val))
 							l.Alignment = text.End
 							l.MaxLines = 1
