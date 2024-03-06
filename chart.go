@@ -167,10 +167,10 @@ func (c *ChartData) layoutYAxisLabels(gtx C, th *material.Theme, pxPerWatt int, 
 }
 
 func (c *ChartData) Update(gtx C) {
-	for len(c.Enabled) < len(c.Series) {
+	for len(c.Enabled) < len(c.Headings) {
 		c.Enabled = append(c.Enabled, &widget.Bool{Value: true})
 	}
-	for len(c.seriesSlices) < len(c.Series) {
+	for len(c.seriesSlices) < len(c.Headings) {
 		c.seriesSlices = append(c.seriesSlices, nil)
 	}
 	if c.pauseBtn.Clicked(gtx) {
