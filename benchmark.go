@@ -66,8 +66,8 @@ type Benchmark struct {
 	startBtn      widget.Clickable
 	ws            backend.WindowState
 	ds            *Dataset
-	results       ResultSet
-	hasResults    bool
+	results       []ResultSet
+	resultList    widget.List
 
 	benchmarkStream *stream.Stream[backend.BenchmarkData]
 	bd              backend.BenchmarkData
@@ -78,9 +78,10 @@ type Benchmark struct {
 
 func NewBenchmark(ws backend.WindowState, expl *explorer.Explorer, ds *Dataset) *Benchmark {
 	return &Benchmark{
-		ws:       ws,
-		explorer: expl,
-		ds:       ds,
+		ws:         ws,
+		explorer:   expl,
+		ds:         ds,
+		resultList: widget.List{List: layout.List{Axis: layout.Vertical}},
 	}
 }
 
@@ -167,14 +168,13 @@ func (b *Benchmark) computeResults() {
 			values[sectionOffset+i*cols+3] = mean
 		}
 	}
-	b.results = ResultSet{
+	b.results = append(b.results, ResultSet{
 		statsRows: rows,
 		statsCols: cols,
 		series:    series,
 		stats:     values,
 		bd:        b.bd,
-	}
-	b.hasResults = true
+	})
 }
 
 func (b *Benchmark) Layout(gtx C, th *material.Theme) D {
@@ -211,108 +211,109 @@ func (b *Benchmark) Layout(gtx C, th *material.Theme) D {
 			)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if !b.hasResults {
-				return D{}
-			}
-			gtx.Constraints.Min.Y = 0
-			tbl := component.Table(th, &b.table)
-			prefixCols := 2
-			longest := material.Body1(th, "Post Baseline")
-			origConstraints := gtx.Constraints
-			gtx.Constraints.Min = image.Point{}
-			longestDims, _ := rec(gtx, func(gtx C) D {
-				return layout.UniformInset(2).Layout(gtx, longest.Layout)
-			})
-			flexedColumns := 1
-			rigidColumns := (b.results.statsCols + prefixCols) - flexedColumns
-			gtx.Constraints = origConstraints
-			return tbl.Layout(gtx, b.results.statsRows, b.results.statsCols+prefixCols, func(axis layout.Axis, index, constraint int) int {
-				if axis == layout.Vertical {
-					return min(longestDims.Size.Y, constraint)
-				}
-				if index == 1 {
-					return (constraint - (longestDims.Size.X * rigidColumns)) / flexedColumns
-				}
-				return longestDims.Size.X
-			},
-				func(gtx layout.Context, index int) layout.Dimensions {
-					return layout.Background{}.Layout(gtx,
-						func(gtx layout.Context) layout.Dimensions {
-							paint.FillShape(gtx.Ops, th.ContrastBg, clip.Rect{Max: gtx.Constraints.Min}.Op())
+			return material.List(th, &b.resultList).Layout(gtx, len(b.results), func(gtx layout.Context, index int) layout.Dimensions {
+				results := b.results[index]
+
+				gtx.Constraints.Min.Y = 0
+				tbl := component.Table(th, &b.table)
+				prefixCols := 2
+				longest := material.Body1(th, "Post Baseline")
+				origConstraints := gtx.Constraints
+				gtx.Constraints.Min = image.Point{}
+				longestDims, _ := rec(gtx, func(gtx C) D {
+					return layout.UniformInset(2).Layout(gtx, longest.Layout)
+				})
+				flexedColumns := 1
+				rigidColumns := (results.statsCols + prefixCols) - flexedColumns
+				gtx.Constraints = origConstraints
+				return tbl.Layout(gtx, results.statsRows, results.statsCols+prefixCols, func(axis layout.Axis, index, constraint int) int {
+					if axis == layout.Vertical {
+						return min(longestDims.Size.Y, constraint)
+					}
+					if index == 1 {
+						return (constraint - (longestDims.Size.X * rigidColumns)) / flexedColumns
+					}
+					return longestDims.Size.X
+				},
+					func(gtx layout.Context, index int) layout.Dimensions {
+						return layout.Background{}.Layout(gtx,
+							func(gtx layout.Context) layout.Dimensions {
+								paint.FillShape(gtx.Ops, th.ContrastBg, clip.Rect{Max: gtx.Constraints.Min}.Op())
+								return D{Size: gtx.Constraints.Min}
+							},
+							func(gtx layout.Context) layout.Dimensions {
+								l := material.Body1(th, "")
+								l.MaxLines = 1
+								l.Color = th.ContrastFg
+								if index == 0 {
+									l.Text = "Phase"
+								} else if index == 1 {
+									l.Text = "Sensor Name"
+								} else {
+									switch index - prefixCols {
+									case 0:
+										l.Text = "sum(J)"
+									case 1:
+										l.Text = "min(W)"
+									case 2:
+										l.Text = "max(W)"
+									case 3:
+										l.Text = "avg(W)"
+									}
+									l.Alignment = text.End
+								}
+								return l.Layout(gtx)
+							},
+						)
+					},
+					func(gtx layout.Context, row, col int) layout.Dimensions {
+						phase := row / len(b.ds.Series)
+						return layout.Background{}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							var c color.NRGBA
+							c = color.NRGBA{R: 100, G: 100, B: 100, A: 0}
+							switch phase {
+							case 1:
+								c.A = 100
+								c.G += 50
+								c.R -= 50
+								c.B -= 50
+							}
+							if row&1 == 0 {
+								c.A += 50
+							}
+							paint.FillShape(gtx.Ops, c, clip.Rect{Max: gtx.Constraints.Min}.Op())
 							return D{Size: gtx.Constraints.Min}
 						},
-						func(gtx layout.Context) layout.Dimensions {
-							l := material.Body1(th, "")
-							l.MaxLines = 1
-							l.Color = th.ContrastFg
-							if index == 0 {
-								l.Text = "Phase"
-							} else if index == 1 {
-								l.Text = "Sensor Name"
-							} else {
-								switch index - prefixCols {
-								case 0:
-									l.Text = "sum(J)"
-								case 1:
-									l.Text = "min(W)"
-								case 2:
-									l.Text = "max(W)"
-								case 3:
-									l.Text = "avg(W)"
+							func(gtx layout.Context) layout.Dimensions {
+								if col == 0 {
+									var label string
+									switch phase {
+									case 0:
+										label = "Pre Baseline"
+									case 2:
+										label = "Post Baseline"
+									case 1:
+										label = "Benchmark"
+									}
+									l := material.Body1(th, label)
+									l.MaxLines = 1
+									return l.Layout(gtx)
+								} else if col == 1 {
+									l := material.Body1(th, b.ds.Headings[row%len(b.ds.Series)])
+									l.MaxLines = 1
+									return l.Layout(gtx)
 								}
+								col -= prefixCols
+								val := results.stats[row*results.statsCols+col]
+								l := material.Body1(th, fmt.Sprintf("%0.2f", val))
 								l.Alignment = text.End
-							}
-							return l.Layout(gtx)
-						},
-					)
-				},
-				func(gtx layout.Context, row, col int) layout.Dimensions {
-					phase := row / len(b.ds.Series)
-					return layout.Background{}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						var c color.NRGBA
-						c = color.NRGBA{R: 100, G: 100, B: 100, A: 0}
-						switch phase {
-						case 1:
-							c.A = 100
-							c.G += 50
-							c.R -= 50
-							c.B -= 50
-						}
-						if row&1 == 0 {
-							c.A += 50
-						}
-						paint.FillShape(gtx.Ops, c, clip.Rect{Max: gtx.Constraints.Min}.Op())
-						return D{Size: gtx.Constraints.Min}
+								l.MaxLines = 1
+								return l.Layout(gtx)
+							},
+						)
 					},
-						func(gtx layout.Context) layout.Dimensions {
-							if col == 0 {
-								var label string
-								switch phase {
-								case 0:
-									label = "Pre Baseline"
-								case 2:
-									label = "Post Baseline"
-								case 1:
-									label = "Benchmark"
-								}
-								l := material.Body1(th, label)
-								l.MaxLines = 1
-								return l.Layout(gtx)
-							} else if col == 1 {
-								l := material.Body1(th, b.ds.Headings[row%len(b.ds.Series)])
-								l.MaxLines = 1
-								return l.Layout(gtx)
-							}
-							col -= prefixCols
-							val := b.results.stats[row*b.results.statsCols+col]
-							l := material.Body1(th, fmt.Sprintf("%0.2f", val))
-							l.Alignment = text.End
-							l.MaxLines = 1
-							return l.Layout(gtx)
-						},
-					)
-				},
-			)
+				)
+			})
 		}),
 	)
 }
