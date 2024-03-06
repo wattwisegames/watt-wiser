@@ -66,6 +66,7 @@ type Benchmark struct {
 	startBtn      widget.Clickable
 	ws            backend.WindowState
 	ds            *Dataset
+	needResults   bool
 	results       []ResultSet
 	resultList    widget.List
 
@@ -115,7 +116,7 @@ func (b *Benchmark) Update(gtx C) {
 		case b.bd.PostBaselineEnd != (time.Time{}):
 			b.status = statusDone
 			b.disableStart = false
-			b.computeResults()
+			b.needResults = true
 		case b.bd.PostBaselineStart != (time.Time{}):
 			b.status = statusRunningPostBaseline
 		case b.bd.PreBaselineEnd != (time.Time{}):
@@ -127,6 +128,7 @@ func (b *Benchmark) Update(gtx C) {
 			b.status = statusError
 		}
 	}
+	b.computeResults()
 
 }
 
@@ -140,6 +142,9 @@ func (b *Benchmark) runCommand(cmd string) {
 }
 
 func (b *Benchmark) computeResults() {
+	if !b.needResults {
+		return
+	}
 	series := slices.Clone(b.ds.Headings)
 	sectionsCount := 3
 	rows := len(series) * sectionsCount
@@ -152,16 +157,20 @@ func (b *Benchmark) computeResults() {
 		case 0:
 			start = b.bd.PreBaselineStart.UnixNano()
 			end = b.bd.PreBaselineEnd.UnixNano()
-		case 2:
-			start = b.bd.PostBaselineStart.UnixNano()
-			end = b.bd.PostBaselineEnd.UnixNano()
 		case 1:
 			start = b.bd.PreBaselineEnd.UnixNano()
 			end = b.bd.PostBaselineStart.UnixNano()
+		case 2:
+			start = b.bd.PostBaselineStart.UnixNano()
+			end = b.bd.PostBaselineEnd.UnixNano()
 		}
 		sectionOffset := section * sectionStride
 		for i, s := range b.ds.Series {
-			max, mean, min, sum, _ := s.RatesBetween(start, end)
+			max, mean, min, sum, ok := s.RatesBetween(start, end)
+			if !ok {
+				// Need to retry once new data is available.
+				return
+			}
 			values[sectionOffset+i*cols+0] = sum
 			values[sectionOffset+i*cols+1] = min
 			values[sectionOffset+i*cols+2] = max
@@ -175,6 +184,7 @@ func (b *Benchmark) computeResults() {
 		stats:     values,
 		bd:        b.bd,
 	})
+	b.needResults = false
 }
 
 func (b *Benchmark) Layout(gtx C, th *material.Theme) D {
