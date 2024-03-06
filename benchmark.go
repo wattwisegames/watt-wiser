@@ -146,23 +146,30 @@ func (b *Benchmark) computeResults() {
 		return
 	}
 	series := slices.Clone(b.ds.Headings)
-	sectionsCount := 3
+	sectionsCount := 4
 	rows := len(series) * sectionsCount
+	baselines := make([]float64, len(series))
 	cols := 4 // energy, minW, maxW, meanW for each baseline and runtime
 	values := make([]float64, rows*cols)
 	sectionStride := len(series) * cols
-	for section := 0; section < sectionsCount; section++ {
+	finalSectionOffset := (sectionsCount - 1) * sectionStride
+	var runDuration float64
+	for section := 0; section < sectionsCount-1; section++ {
 		var start, end int64
+		isBaseline := false
 		switch section {
 		case 0:
 			start = b.bd.PreBaselineStart.UnixNano()
 			end = b.bd.PreBaselineEnd.UnixNano()
+			isBaseline = true
 		case 1:
 			start = b.bd.PreBaselineEnd.UnixNano()
 			end = b.bd.PostBaselineStart.UnixNano()
+			runDuration = float64(end-start) / 1_000_000_000
 		case 2:
 			start = b.bd.PostBaselineStart.UnixNano()
 			end = b.bd.PostBaselineEnd.UnixNano()
+			isBaseline = true
 		}
 		sectionOffset := section * sectionStride
 		for i, s := range b.ds.Series {
@@ -175,8 +182,23 @@ func (b *Benchmark) computeResults() {
 			values[sectionOffset+i*cols+1] = min
 			values[sectionOffset+i*cols+2] = max
 			values[sectionOffset+i*cols+3] = mean
+			if isBaseline {
+				baselines[i] += mean * .5
+			} else {
+				values[finalSectionOffset+i*cols+0] = sum
+				values[finalSectionOffset+i*cols+1] = min
+				values[finalSectionOffset+i*cols+2] = max
+				values[finalSectionOffset+i*cols+3] = mean
+			}
 		}
 	}
+	for i, baseline := range baselines {
+		values[finalSectionOffset+i*cols+0] -= baseline * float64(runDuration)
+		values[finalSectionOffset+i*cols+1] -= baseline
+		values[finalSectionOffset+i*cols+2] -= baseline
+		values[finalSectionOffset+i*cols+3] -= baseline
+	}
+
 	b.results = append(b.results, ResultSet{
 		statsRows: rows,
 		statsCols: cols,
@@ -287,6 +309,11 @@ func (b *Benchmark) Layout(gtx C, th *material.Theme) D {
 								c.G += 50
 								c.R -= 50
 								c.B -= 50
+							case 3:
+								c.A = 100
+								c.G += 50
+								c.R -= 50
+								c.B -= 50
 							}
 							if row&1 == 0 {
 								c.A += 50
@@ -300,10 +327,12 @@ func (b *Benchmark) Layout(gtx C, th *material.Theme) D {
 									switch phase {
 									case 0:
 										label = "Pre Baseline"
-									case 2:
-										label = "Post Baseline"
 									case 1:
 										label = "Benchmark"
+									case 2:
+										label = "Post Baseline"
+									case 3:
+										label = "Adjusted"
 									}
 									l := material.Body1(th, label)
 									l.MaxLines = 1
