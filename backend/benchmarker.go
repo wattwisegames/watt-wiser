@@ -90,7 +90,6 @@ func (b *Benchmark) Run(commandName string, baselineDur time.Duration) (mutation
 				return
 			}
 			// We're done.
-			return
 		}()
 		return out
 	})
