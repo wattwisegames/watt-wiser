@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"git.sr.ht/~whereswaldon/watt-wiser/backend"
+)
 
 func TestSeries(t *testing.T) {
 	s := Series{}
@@ -8,7 +12,12 @@ func TestSeries(t *testing.T) {
 	sampleCount := int64(10)
 	expectedSum := float64(0)
 	for i := int64(0); i < sampleCount; i++ {
-		ok := s.Insert(i*interval, (i+1)*interval, float64(i))
+		sample := backend.Sample{
+			StartTimestampNS: i * interval,
+			EndTimestampNS:   (i + 1) * interval,
+			Value:            float64(i),
+		}
+		ok := s.Insert(sample)
 		if !ok {
 			t.Errorf("inserting non-overlapping samples should always be okay, but sample %d failed", i)
 		}
@@ -17,7 +26,7 @@ func TestSeries(t *testing.T) {
 	halfSample := interval / 2
 	sum := float64(0)
 	for i := int64(0); i < sampleCount*2; i++ {
-		max, mean, min, ok := s.RatesBetween(i*halfSample, (i+1)*halfSample)
+		max, mean, min, _, ok := s.RatesBetween(i*halfSample, (i+1)*halfSample)
 		if !ok {
 			t.Errorf("querying values in range should always be okay, value %d was not", i)
 		}
