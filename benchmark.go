@@ -301,8 +301,7 @@ func (b *Benchmark) Layout(gtx C, th *material.Theme) D {
 					func(gtx layout.Context, row, col int) layout.Dimensions {
 						phase := row / len(b.ds.Series)
 						return layout.Background{}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							var c color.NRGBA
-							c = color.NRGBA{R: 100, G: 100, B: 100, A: 0}
+							c := color.NRGBA{R: 100, G: 100, B: 100, A: 0}
 							switch phase {
 							case 1:
 								c.A = 100
