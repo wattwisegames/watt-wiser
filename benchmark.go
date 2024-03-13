@@ -60,7 +60,8 @@ type ResultSet struct {
 }
 
 type Benchmark struct {
-	commandEditor widget.Editor
+	commandEditor component.TextField
+	notesEditor   component.TextField
 	chooseFileBtn widget.Clickable
 	disableStart  bool
 	startBtn      widget.Clickable
@@ -86,16 +87,12 @@ func NewBenchmark(ws backend.WindowState, expl *explorer.Explorer, ds *Dataset) 
 	}
 }
 
-func (b *Benchmark) Update(gtx C) {
-	for {
-		_, ok := b.commandEditor.Update(gtx)
-		if !ok {
-			break
-		}
-	}
+func (b *Benchmark) Update(gtx C, th *material.Theme) {
+	b.commandEditor.Update(gtx, th, "Executable to Benchmark")
+	b.notesEditor.Update(gtx, th, "Benchmark Notes")
 	if b.startBtn.Clicked(gtx) {
 		b.disableStart = true
-		b.runCommand(b.commandEditor.Text())
+		b.runCommand(b.commandEditor.Text(), b.notesEditor.Text())
 	}
 	if b.chooseFileBtn.Clicked(gtx) {
 		f, err := b.explorer.ChooseFile()
@@ -132,8 +129,8 @@ func (b *Benchmark) Update(gtx C) {
 
 }
 
-func (b *Benchmark) runCommand(cmd string) {
-	mut, ok := b.ws.Benchmark.Run(cmd, time.Second*2)
+func (b *Benchmark) runCommand(cmd, notes string) {
+	mut, ok := b.ws.Benchmark.Run(cmd, notes, time.Second*2)
 	if !ok {
 		log.Printf("did not create new benchmarkStream")
 		return
@@ -210,7 +207,8 @@ func (b *Benchmark) computeResults() {
 }
 
 func (b *Benchmark) Layout(gtx C, th *material.Theme) D {
-	b.Update(gtx)
+	inset := layout.UniformInset(2)
+	b.Update(gtx, th)
 	return layout.Flex{
 		Axis: layout.Vertical,
 	}.Layout(gtx,
@@ -218,27 +216,42 @@ func (b *Benchmark) Layout(gtx C, th *material.Theme) D {
 			return layout.Flex{
 				Alignment: layout.Baseline,
 			}.Layout(gtx,
-				layout.Flexed(1, material.Editor(th, &b.commandEditor, "command").Layout),
-				layout.Rigid(material.Button(th, &b.chooseFileBtn, "Browse").Layout),
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return b.commandEditor.Layout(gtx, th, "Executable to benchmark")
+					})
+				}),
+				layout.Rigid(func(gtx C) D {
+					return inset.Layout(gtx, material.Button(th, &b.chooseFileBtn, "Browse").Layout)
+				}),
 			)
+		}),
+		layout.Rigid(func(gtx C) D {
+			return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return b.notesEditor.Layout(gtx, th, "Benchmark Notes")
+			})
 		}),
 		layout.Rigid(func(gtx C) D {
 			return layout.Flex{
 				Alignment: layout.Baseline,
 			}.Layout(gtx,
 				layout.Flexed(1, func(gtx C) D {
-					btn := material.Button(th, &b.startBtn, "Start")
-					if b.disableStart || b.commandEditor.Len() == 0 {
-						gtx = gtx.Disabled()
-					}
-					return btn.Layout(gtx)
+					return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						btn := material.Button(th, &b.startBtn, "Start")
+						if b.disableStart || b.commandEditor.Len() == 0 {
+							gtx = gtx.Disabled()
+						}
+						return btn.Layout(gtx)
+					})
 				}),
 				layout.Flexed(1, func(gtx C) D {
-					l := material.Body1(th, b.status.String())
-					if b.bd.Err != nil {
-						l.Text += " " + b.bd.Err.Error()
-					}
-					return l.Layout(gtx)
+					return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						l := material.Body1(th, "Status: "+b.status.String())
+						if b.bd.Err != nil {
+							l.Text += " " + b.bd.Err.Error()
+						}
+						return l.Layout(gtx)
+					})
 				}),
 			)
 		}),

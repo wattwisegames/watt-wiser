@@ -86,7 +86,7 @@ func (ui *UI) Update(gtx C) {
 		ui.chart.Update(gtx)
 	case backend.ModeSensing:
 		ui.chart.Update(gtx)
-		ui.benchmark.Update(gtx)
+		ui.benchmark.Update(gtx, ui.th)
 	}
 	ui.tab.Update(gtx)
 	if ui.status.Err != nil {
