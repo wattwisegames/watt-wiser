@@ -20,11 +20,13 @@ func NewBenchmark(mutator *stream.Mutator) *Benchmark {
 }
 
 type BenchmarkData struct {
+	Command                                                              string
+	Notes                                                                string
 	PreBaselineStart, PreBaselineEnd, PostBaselineStart, PostBaselineEnd time.Time
 	Err                                                                  error
 }
 
-func (b *Benchmark) Run(commandName string, baselineDur time.Duration) (mutation *stream.Mutation[BenchmarkData], isNew bool) {
+func (b *Benchmark) Run(commandName, notes string, baselineDur time.Duration) (mutation *stream.Mutation[BenchmarkData], isNew bool) {
 	return stream.Mutate(b.pool, commandName, func(ctx context.Context) (values <-chan BenchmarkData) {
 		out := make(chan BenchmarkData)
 		go func() {
@@ -33,6 +35,8 @@ func (b *Benchmark) Run(commandName string, baselineDur time.Duration) (mutation
 			cmd.Stderr = os.Stderr
 			cmd.Stdout = os.Stdout
 			currentData := BenchmarkData{
+				Command:          commandName,
+				Notes:            notes,
 				PreBaselineStart: time.Now(),
 			}
 			timer := time.NewTimer(baselineDur)
