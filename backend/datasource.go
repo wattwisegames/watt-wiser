@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"gioui.org/x/explorer"
 	"git.sr.ht/~gioverse/skel/stream"
@@ -52,17 +53,19 @@ const (
 )
 
 type Status struct {
-	Mode Mode
-	Err  error
+	Mode      Mode
+	SessionID string
+	Err       error
 }
 
 type Datasource struct {
-	pool          *stream.MutationPool[struct{}, chan any]
-	statusSource  *stream.Source[Status, Status]
-	watcher       *fsnotify.Watcher
-	samples       chan InputData
-	appCtx        context.Context
-	seriesCounter atomic.Int32
+	pool            *stream.MutationPool[struct{}, chan any]
+	statusSource    *stream.Source[Status, Status]
+	watcher         *fsnotify.Watcher
+	samples         chan InputData
+	internalSamples chan InputData
+	appCtx          context.Context
+	seriesCounter   atomic.Int32
 }
 
 func NewDatasource(appCtx context.Context, mutator *stream.Mutator) (*Datasource, error) {
@@ -70,19 +73,105 @@ func NewDatasource(appCtx context.Context, mutator *stream.Mutator) (*Datasource
 	if err != nil {
 		return nil, fmt.Errorf("failed creating file watcher: %w", err)
 	}
-	return &Datasource{
+	ds := &Datasource{
 		pool: stream.NewMutationPool[struct{}, chan any](mutator),
 		statusSource: stream.NewSource(func(s Status) (Status, bool) {
 			return s, true
 		}),
-		watcher: watcher,
-		appCtx:  appCtx,
-		samples: make(chan InputData, 1024),
-	}, nil
+		watcher:         watcher,
+		appCtx:          appCtx,
+		samples:         make(chan InputData, 1024),
+		internalSamples: make(chan InputData, 1024),
+	}
+	go ds.recordSession(appCtx)
+	return ds, nil
 }
 
 func (d *Datasource) Status(ctx context.Context) <-chan Status {
 	return d.statusSource.Stream(ctx)
+}
+
+func generateSessionID() string {
+	return strings.Replace(time.Now().UTC().Format("20060102150405.000000000"), ".", "", 1)
+}
+
+func (d *Datasource) setSession(id string) {
+	d.statusSource.Update(func(oldState Status) Status {
+		oldState.SessionID = id
+		return oldState
+	})
+}
+
+func (d *Datasource) setError(err error) {
+	log.Printf("datasource error: %v", err)
+	d.statusSource.Update(func(oldState Status) Status {
+		oldState.Err = err
+		return oldState
+	})
+}
+
+func (d *Datasource) recordSession(ctx context.Context) {
+	var sessionFile *os.File
+	var sessionWriter *bufio.Writer
+	var csvWriter *csv.Writer
+	flushAll := func() {
+		csvWriter.Flush()
+		err := sessionWriter.Flush()
+		err = errors.Join(err, sessionFile.Close())
+		if err != nil {
+			d.setError(err)
+		}
+	}
+	headings := []string{"start (ns)", "end (ns)"}
+	seriesIDToHeading := map[int]int{}
+	for {
+		select {
+		case <-ctx.Done():
+			flushAll()
+			return
+		case sample := <-d.internalSamples:
+			// Immediately forward to UI.
+			d.samples <- sample
+			if sample.Kind == KindHeadings {
+				newSessionID := generateSessionID()
+				if sessionFile != nil {
+					flushAll()
+				}
+				var err error
+				sessionFile, err = os.Create("watt-wiser-" + newSessionID + ".csv")
+				if err != nil {
+					d.setError(err)
+					return
+				}
+				sessionWriter = bufio.NewWriter(sessionFile)
+				csvWriter = csv.NewWriter(sessionWriter)
+				d.setSession(newSessionID)
+				for sampleHeadingIdx, heading := range sample.Headings {
+					series := sample.HeadingSeries[sampleHeadingIdx]
+					localHeadingIdx := len(headings)
+					headings = append(headings, heading)
+					seriesIDToHeading[series] = localHeadingIdx
+				}
+				if err := csvWriter.Write(headings); err != nil {
+					d.setError(err)
+					return
+				}
+			} else {
+				start := strconv.FormatInt(sample.StartTimestampNS, 10)
+				end := strconv.FormatInt(sample.EndTimestampNS, 10)
+				position := seriesIDToHeading[sample.Series]
+				val := strconv.FormatFloat(sample.Value, 'f', -1, 64)
+				record := make([]string, len(headings))
+				record[0] = start
+				record[1] = end
+				record[position] = val
+				if err := csvWriter.Write(record); err != nil {
+					d.setError(err)
+					return
+				}
+			}
+		}
+	}
 }
 
 func (d *Datasource) Samples() <-chan InputData {
@@ -92,10 +181,7 @@ func (d *Datasource) Samples() <-chan InputData {
 func (d *Datasource) LoadFromFile(expl *explorer.Explorer) {
 	file, err := expl.ChooseFile()
 	if err != nil {
-		d.statusSource.Update(func(oldState Status) Status {
-			oldState.Err = err
-			return oldState
-		})
+		d.setError(err)
 		return
 	}
 	d.LoadFromStream(file)
@@ -115,10 +201,7 @@ func (d *Datasource) LoadFromStream(file io.ReadCloser) {
 func (d *Datasource) LaunchSensors() {
 	traceReader, err := launchSensors(d.appCtx)
 	if err != nil {
-		d.statusSource.Update(func(oldState Status) Status {
-			oldState.Err = err
-			return oldState
-		})
+		d.setError(err)
 		return
 	}
 	go d.readSource(traceReader)
@@ -166,13 +249,6 @@ func launchSensors(ctx context.Context) (io.ReadCloser, error) {
 	return output, nil
 }
 
-func (d *Datasource) setError(err error) {
-	d.statusSource.Update(func(oldState Status) Status {
-		oldState.Err = err
-		return oldState
-	})
-}
-
 func (d *Datasource) readSource(source io.Reader) {
 	bufRead := NewLineReader(source)
 	csvReader := csv.NewReader(bufRead)
@@ -205,7 +281,7 @@ func (d *Datasource) readSource(source io.Reader) {
 			}
 		}
 	}
-	d.samples <- InputData{
+	d.internalSamples <- InputData{
 		Kind:          KindHeadings,
 		Headings:      relevantHeadings,
 		HeadingSeries: headingSeries,
@@ -245,7 +321,7 @@ readLoop:
 			if !indexIsEnergy[i] {
 				unit = sensors.Watts
 			}
-			d.samples <- InputData{
+			d.internalSamples <- InputData{
 				Kind: KindSample,
 				Sample: Sample{
 					StartTimestampNS: startNs,
