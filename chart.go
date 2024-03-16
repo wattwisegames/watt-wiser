@@ -22,6 +22,7 @@ import (
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 	"gioui.org/x/component"
+	"git.sr.ht/~whereswaldon/watt-wiser/backend"
 	"golang.org/x/exp/constraints"
 	"golang.org/x/exp/shiny/materialdesign/icons"
 )
@@ -44,7 +45,7 @@ type timeslice struct {
 }
 
 type ChartData struct {
-	*Dataset
+	*backend.Dataset
 	seriesSlices [][]timeslice
 	Enabled      []*widget.Bool
 	Stacked      widget.Bool
@@ -65,7 +66,7 @@ type ChartData struct {
 	isHovered bool
 }
 
-func NewChart(ds *Dataset) *ChartData {
+func NewChart(ds *backend.Dataset) *ChartData {
 	return &ChartData{
 		Dataset: ds,
 		nsPerDp: 10_000_000,

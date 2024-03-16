@@ -75,10 +75,10 @@ type resultStyle struct {
 	discloser    component.SimpleDiscloserStyle
 	results      ResultSet
 	th           *material.Theme
-	ds           *Dataset
+	ds           *backend.Dataset
 }
 
-func result(th *material.Theme, state *resultState, result ResultSet, ds *Dataset) resultStyle {
+func result(th *material.Theme, state *resultState, result ResultSet, ds *backend.Dataset) resultStyle {
 	rs := resultStyle{
 		state:        state,
 		detailTable:  component.Table(th, &state.DetailGrid),
@@ -285,7 +285,7 @@ type Benchmark struct {
 	disableStart  bool
 	startBtn      widget.Clickable
 	ws            backend.WindowState
-	ds            *Dataset
+	ds            *backend.Dataset
 	needResults   bool
 	results       []ResultSet
 	resultList    widget.List
@@ -300,7 +300,7 @@ type Benchmark struct {
 	table               component.GridState
 }
 
-func NewBenchmark(ws backend.WindowState, expl *explorer.Explorer, ds *Dataset) *Benchmark {
+func NewBenchmark(ws backend.WindowState, expl *explorer.Explorer, ds *backend.Dataset) *Benchmark {
 	return &Benchmark{
 		ws:                  ws,
 		explorer:            expl,

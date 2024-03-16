@@ -1,9 +1,7 @@
-package main
+package backend
 
 import (
 	"testing"
-
-	"git.sr.ht/~whereswaldon/watt-wiser/backend"
 )
 
 func TestSeries(t *testing.T) {
@@ -12,7 +10,7 @@ func TestSeries(t *testing.T) {
 	sampleCount := int64(10)
 	expectedSum := float64(0)
 	for i := int64(0); i < sampleCount; i++ {
-		sample := backend.Sample{
+		sample := Sample{
 			StartTimestampNS: i * interval,
 			EndTimestampNS:   (i + 1) * interval,
 			Value:            float64(i),

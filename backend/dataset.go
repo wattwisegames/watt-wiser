@@ -1,8 +1,4 @@
-package main
-
-import (
-	"git.sr.ht/~whereswaldon/watt-wiser/backend"
-)
+package backend
 
 type Dataset struct {
 	DomainMin int64
@@ -38,7 +34,7 @@ func (d *Dataset) SetHeadings(headings []string, series []int) {
 
 // Insert the sample. Will panic if the sample's Series does not have a heading previously
 // registered via [SetHeadings].
-func (c *Dataset) Insert(sample backend.Sample) {
+func (c *Dataset) Insert(sample Sample) {
 	if !c.initialized {
 		c.DomainMin = sample.StartTimestampNS
 		c.DomainMax = sample.StartTimestampNS

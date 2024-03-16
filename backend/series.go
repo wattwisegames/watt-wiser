@@ -1,9 +1,8 @@
-package main
+package backend
 
 import (
 	"sort"
 
-	"git.sr.ht/~whereswaldon/watt-wiser/backend"
 	"git.sr.ht/~whereswaldon/watt-wiser/sensors"
 )
 
@@ -19,7 +18,7 @@ type Series struct {
 // Insert adds a value at a given timestamp to the series. In the event
 // that the series already contains a value at that time, nothing is added
 // and the method returns false. Otherwise, the method returns true.
-func (s *Series) Insert(sample backend.Sample) (inserted bool) {
+func (s *Series) Insert(sample Sample) (inserted bool) {
 	if len(s.endTimestamps) > 0 && s.endTimestamps[len(s.endTimestamps)-1] > sample.StartTimestampNS {
 		// Reject samples with times overlapping the existing data in the series.
 		return false

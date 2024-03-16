@@ -30,7 +30,7 @@ const (
 type UI struct {
 	ws   backend.WindowState
 	expl *explorer.Explorer
-	ds   Dataset
+	ds   backend.Dataset
 
 	chart       *ChartData
 	benchmark   *Benchmark
