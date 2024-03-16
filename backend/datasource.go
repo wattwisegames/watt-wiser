@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -22,6 +23,23 @@ import (
 	"git.sr.ht/~whereswaldon/watt-wiser/sensors"
 	"github.com/fsnotify/fsnotify"
 )
+
+type RWBox[T any] struct {
+	t    T
+	lock sync.RWMutex
+}
+
+func (r *RWBox[T]) Read(f func(*T)) {
+	r.lock.RLock()
+	defer r.lock.RUnlock()
+	f(&r.t)
+}
+
+func (r *RWBox[T]) Write(f func(*T)) {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	f(&r.t)
+}
 
 type InputKind uint8
 
@@ -59,7 +77,7 @@ type Status struct {
 }
 
 type Datasource struct {
-	pool            *stream.MutationPool[struct{}, chan any]
+	pool            *stream.MutationPool[string, *RWBox[Dataset]]
 	statusSource    *stream.Source[Status, Status]
 	watcher         *fsnotify.Watcher
 	samples         chan InputData
@@ -74,7 +92,7 @@ func NewDatasource(appCtx context.Context, mutator *stream.Mutator) (*Datasource
 		return nil, fmt.Errorf("failed creating file watcher: %w", err)
 	}
 	ds := &Datasource{
-		pool: stream.NewMutationPool[struct{}, chan any](mutator),
+		pool: stream.NewMutationPool[string, *RWBox[Dataset]](mutator),
 		statusSource: stream.NewSource(func(s Status) (Status, bool) {
 			return s, true
 		}),
@@ -83,7 +101,6 @@ func NewDatasource(appCtx context.Context, mutator *stream.Mutator) (*Datasource
 		samples:         make(chan InputData, 1024),
 		internalSamples: make(chan InputData, 1024),
 	}
-	go ds.recordSession(appCtx)
 	return ds, nil
 }
 
@@ -124,72 +141,83 @@ func (d *Datasource) setError(err error) {
 	})
 }
 
-func (d *Datasource) recordSession(ctx context.Context) {
-	var sessionFile *os.File
-	var sessionWriter *bufio.Writer
-	var csvWriter *csv.Writer
-	flushAll := func() {
-		csvWriter.Flush()
-		err := sessionWriter.Flush()
-		err = errors.Join(err, sessionFile.Close())
-		if err != nil {
-			d.setError(err)
-		}
-	}
-	headings := []string{"start (ns)", "end (ns)"}
-	seriesIDToHeading := map[int]int{}
-	for {
-		select {
-		case <-ctx.Done():
-			flushAll()
-			return
-		case sample := <-d.internalSamples:
-			// Immediately forward to UI.
-			d.samples <- sample
-			if sample.Kind == KindHeadings {
-				newSessionID := generateSessionID()
-				if sessionFile != nil {
-					flushAll()
-				}
-				var err error
-				sessionFile, err = os.Create(sessionFileFor(newSessionID))
+func (d *Datasource) recordSession(sessionID string) *stream.Mutation[*RWBox[Dataset]] {
+	box, _ := stream.Mutate(d.pool, sessionID, func(ctx context.Context) (values <-chan *RWBox[Dataset]) {
+		out := make(chan *RWBox[Dataset], 1)
+		go func() {
+			defer close(out)
+			var data RWBox[Dataset]
+			// Emit our boxed dataset immediately.
+			out <- &data
+			var sessionFile *os.File
+			var sessionWriter *bufio.Writer
+			var csvWriter *csv.Writer
+			flushAll := func() {
+				csvWriter.Flush()
+				err := sessionWriter.Flush()
+				err = errors.Join(err, sessionFile.Close())
 				if err != nil {
 					d.setError(err)
-					return
-				}
-				sessionWriter = bufio.NewWriter(sessionFile)
-				csvWriter = csv.NewWriter(sessionWriter)
-				d.setSession(newSessionID)
-				for sampleHeadingIdx, heading := range sample.Headings {
-					series := sample.HeadingSeries[sampleHeadingIdx]
-					localHeadingIdx := len(headings)
-					headings = append(headings, heading)
-					seriesIDToHeading[series] = localHeadingIdx
-				}
-				if err := csvWriter.Write(headings); err != nil {
-					d.setError(err)
-					return
-				}
-			} else {
-				start := strconv.FormatInt(sample.StartTimestampNS, 10)
-				end := strconv.FormatInt(sample.EndTimestampNS, 10)
-				position := seriesIDToHeading[sample.Series]
-				val := strconv.FormatFloat(sample.Value, 'f', -1, 64)
-				record := make([]string, len(headings))
-				record[0] = start
-				record[1] = end
-				record[position] = val
-				if err := csvWriter.Write(record); err != nil {
-					d.setError(err)
-					return
 				}
 			}
-		}
-	}
-}
-
-func (d *Datasource) Samples() <-chan InputData {
-	return d.samples
+			headings := []string{"start (ns)", "end (ns)"}
+			seriesIDToHeading := map[int]int{}
+			for {
+				select {
+				case <-ctx.Done():
+					flushAll()
+					return
+				case sample := <-d.internalSamples:
+					if sample.Kind == KindHeadings {
+						data.Write(func(d *Dataset) {
+							d.SetHeadings(sample.Headings, sample.HeadingSeries)
+						})
+						newSessionID := generateSessionID()
+						if sessionFile != nil {
+							flushAll()
+						}
+						var err error
+						sessionFile, err = os.Create(sessionFileFor(newSessionID))
+						if err != nil {
+							d.setError(err)
+							return
+						}
+						sessionWriter = bufio.NewWriter(sessionFile)
+						csvWriter = csv.NewWriter(sessionWriter)
+						d.setSession(newSessionID)
+						for sampleHeadingIdx, heading := range sample.Headings {
+							series := sample.HeadingSeries[sampleHeadingIdx]
+							localHeadingIdx := len(headings)
+							headings = append(headings, heading)
+							seriesIDToHeading[series] = localHeadingIdx
+						}
+						if err := csvWriter.Write(headings); err != nil {
+							d.setError(err)
+							return
+						}
+					} else {
+						data.Write(func(d *Dataset) {
+							d.Insert(sample.Sample)
+						})
+						start := strconv.FormatInt(sample.StartTimestampNS, 10)
+						end := strconv.FormatInt(sample.EndTimestampNS, 10)
+						position := seriesIDToHeading[sample.Series]
+						val := strconv.FormatFloat(sample.Value, 'f', -1, 64)
+						record := make([]string, len(headings))
+						record[0] = start
+						record[1] = end
+						record[position] = val
+						if err := csvWriter.Write(record); err != nil {
+							d.setError(err)
+							return
+						}
+					}
+				}
+			}
+		}()
+		return out
+	})
+	return box
 }
 
 func (d *Datasource) LoadFromFile(expl *explorer.Explorer) {
@@ -201,18 +229,22 @@ func (d *Datasource) LoadFromFile(expl *explorer.Explorer) {
 	d.LoadFromStream(file)
 }
 
-func (d *Datasource) LoadFromStream(file io.ReadCloser) {
-	if f, ok := file.(interface{ Name() string }); ok {
-		d.watcher.Add(f.Name())
+func (d *Datasource) LoadFromStream(files ...io.ReadCloser) {
+	//TODO: Spawn a new session for this files set
+	for _, file := range files {
+		if f, ok := file.(interface{ Name() string }); ok {
+			d.watcher.Add(f.Name())
+		}
+		go d.readSource(file)
+		d.statusSource.Update(func(oldState Status) Status {
+			oldState.Mode = ModeReplaying
+			return oldState
+		})
 	}
-	go d.readSource(file)
-	d.statusSource.Update(func(oldState Status) Status {
-		oldState.Mode = ModeReplaying
-		return oldState
-	})
 }
 
 func (d *Datasource) LaunchSensors() {
+	//TODO: Spawn a new session for this sensor run
 	traceReader, err := launchSensors(d.appCtx)
 	if err != nil {
 		d.setError(err)

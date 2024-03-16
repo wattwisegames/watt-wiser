@@ -57,6 +57,7 @@ Flags:
 	}
 	go func() {
 		w := app.NewWindow(app.Title("Watt Wiser"))
+		files := []io.ReadCloser{}
 		for i := 0; i < flag.NArg(); i++ {
 			arg := flag.Arg(i)
 			var f io.ReadCloser
@@ -71,9 +72,10 @@ Flags:
 				}
 			}
 			if f != nil {
-				bundle.Datasource.LoadFromStream(f)
+				files = append(files, f)
 			}
 		}
+		bundle.Datasource.LoadFromStream(files...)
 		go func() {
 			err := loop(w, bundle)
 			if traceInto != "" {
