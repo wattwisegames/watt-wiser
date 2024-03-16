@@ -112,7 +112,8 @@ func main() {
 	}
 	fmt.Fprintln(output)
 	samples := make([]float64, len(sensorList))
-	lastReadTime := time.Now()
+	absStartTime := time.Now()
+	lastReadTime := absStartTime.UnixNano()
 	// Pre-read every sensor once to ensure that incremental sensors emit coherent first values.
 	for _, chip := range sensorList {
 		_, err := chip.Read()
@@ -143,10 +144,15 @@ func main() {
 				}
 				samples[chipIdx] = v
 			}
-			readFinishedAt := time.Now()
-			if readDuration := readFinishedAt.Sub(lastReadTime); readDuration < sampleRate*2 {
+			// Compute durations spent reading sensors relative to our fixed start time.
+			readFinishedAt := time.Since(absStartTime)
+			readStartedAt := sampleEndTime.Sub(absStartTime)
+			// Then compute the end of the sample by adding a monotonic interval to our fixed
+			// start time to avoid clock skew.
+			readStartAbs := absStartTime.UnixNano() + readStartedAt.Nanoseconds()
+			if readDuration := readFinishedAt - readStartedAt; readDuration < sampleRate*2 {
 				// This sample was not interrupted mid-read, so we're good.
-				fmt.Fprintf(output, "%d, %d, ", lastReadTime.UnixNano(), sampleEndTime.UnixNano())
+				fmt.Fprintf(output, "%d, %d, ", lastReadTime, readStartAbs)
 				for chipIdx := range sensorList {
 					v := samples[chipIdx]
 					fmt.Fprintf(output, "%f, ", v)
@@ -155,7 +161,8 @@ func main() {
 			} else {
 				log.Printf("dropping sample with read duration %d >= sample rate %d", readDuration, sampleRate)
 			}
-			lastReadTime = sampleEndTime
+			// Update our lastReadTime to the non-clock-skewed timestamp of when we started the sensor reads.
+			lastReadTime = readStartAbs
 			for i := range samples {
 				samples[i] = 0
 			}
