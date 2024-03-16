@@ -31,7 +31,7 @@ func NewBundle(appCtx context.Context, mutator *stream.Mutator) (Bundle, error) 
 		return Bundle{}, fmt.Errorf("failed constructing bundle: %w", err)
 	}
 	return Bundle{
-		Benchmark:  NewBenchmark(mutator),
+		Benchmark:  NewBenchmark(mutator, ds),
 		Datasource: ds,
 	}, nil
 }

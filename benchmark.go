@@ -71,19 +71,22 @@ type Benchmark struct {
 	results       []ResultSet
 	resultList    widget.List
 
-	benchmarkStream *stream.Stream[backend.BenchmarkData]
-	bd              backend.BenchmarkData
-	status          benchmarkStatus
-	explorer        *explorer.Explorer
-	table           component.GridState
+	backendStatusStream *stream.Stream[backend.Status]
+	backendStatus       backend.Status
+	benchmarkStream     *stream.Stream[backend.BenchmarkData]
+	bd                  backend.BenchmarkData
+	status              benchmarkStatus
+	explorer            *explorer.Explorer
+	table               component.GridState
 }
 
 func NewBenchmark(ws backend.WindowState, expl *explorer.Explorer, ds *Dataset) *Benchmark {
 	return &Benchmark{
-		ws:         ws,
-		explorer:   expl,
-		ds:         ds,
-		resultList: widget.List{List: layout.List{Axis: layout.Vertical}},
+		ws:                  ws,
+		explorer:            expl,
+		ds:                  ds,
+		resultList:          widget.List{List: layout.List{Axis: layout.Vertical}},
+		backendStatusStream: stream.New(ws.Controller, ws.Bundle.Datasource.Status),
 	}
 }
 
@@ -106,19 +109,22 @@ func (b *Benchmark) Update(gtx C, th *material.Theme) {
 			}
 		}
 	}
+	b.backendStatusStream.ReadInto(gtx, &b.backendStatus, backend.Status{
+		Mode: backend.ModeNone,
+	})
 	data, isNew := b.benchmarkStream.ReadNew(gtx)
 	if isNew {
 		b.bd = data
 		switch {
-		case b.bd.PostBaselineEnd != (time.Time{}):
+		case b.bd.PostBaselineEnd != 0:
 			b.status = statusDone
 			b.disableStart = false
 			b.needResults = true
-		case b.bd.PostBaselineStart != (time.Time{}):
+		case b.bd.PostBaselineStart != 0:
 			b.status = statusRunningPostBaseline
-		case b.bd.PreBaselineEnd != (time.Time{}):
+		case b.bd.PreBaselineEnd != 0:
 			b.status = statusRunningCommand
-		case b.bd.PreBaselineStart != (time.Time{}):
+		case b.bd.PreBaselineStart != 0:
 			b.status = statusRunningPreBaseline
 		}
 		if b.bd.Err != nil {
@@ -156,16 +162,16 @@ func (b *Benchmark) computeResults() {
 		isBaseline := false
 		switch section {
 		case 0:
-			start = b.bd.PreBaselineStart.UnixNano()
-			end = b.bd.PreBaselineEnd.UnixNano()
+			start = b.bd.PreBaselineStart
+			end = b.bd.PreBaselineEnd
 			isBaseline = true
 		case 1:
-			start = b.bd.PreBaselineEnd.UnixNano()
-			end = b.bd.PostBaselineStart.UnixNano()
+			start = b.bd.PreBaselineEnd
+			end = b.bd.PostBaselineStart
 			runDuration = float64(end-start) / 1_000_000_000
 		case 2:
-			start = b.bd.PostBaselineStart.UnixNano()
-			end = b.bd.PostBaselineEnd.UnixNano()
+			start = b.bd.PostBaselineStart
+			end = b.bd.PostBaselineEnd
 			isBaseline = true
 		}
 		sectionOffset := section * sectionStride

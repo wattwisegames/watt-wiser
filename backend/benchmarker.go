@@ -11,18 +11,20 @@ import (
 
 type Benchmark struct {
 	pool *stream.MutationPool[string, BenchmarkData]
+	ds   *Datasource
 }
 
-func NewBenchmark(mutator *stream.Mutator) *Benchmark {
+func NewBenchmark(mutator *stream.Mutator, ds *Datasource) *Benchmark {
 	return &Benchmark{
 		pool: stream.NewMutationPool[string, BenchmarkData](mutator),
+		ds:   ds,
 	}
 }
 
 type BenchmarkData struct {
 	Command                                                              string
 	Notes                                                                string
-	PreBaselineStart, PreBaselineEnd, PostBaselineStart, PostBaselineEnd time.Time
+	PreBaselineStart, PreBaselineEnd, PostBaselineStart, PostBaselineEnd int64
 	Err                                                                  error
 }
 
@@ -34,10 +36,11 @@ func (b *Benchmark) Run(commandName, notes string, baselineDur time.Duration) (m
 			cmd := exec.CommandContext(ctx, commandName)
 			cmd.Stderr = os.Stderr
 			cmd.Stdout = os.Stdout
+			startTime := time.Now()
 			currentData := BenchmarkData{
 				Command:          commandName,
 				Notes:            notes,
-				PreBaselineStart: time.Now(),
+				PreBaselineStart: startTime.UnixNano(),
 			}
 			timer := time.NewTimer(baselineDur)
 			// Emit pre start time data.
@@ -49,7 +52,8 @@ func (b *Benchmark) Run(commandName, notes string, baselineDur time.Duration) (m
 			// Wait for timer to expire.
 			select {
 			case t := <-timer.C:
-				currentData.PreBaselineEnd = t
+				// By adding the monotonic interval between now and the start time, we avoid clock skew.
+				currentData.PreBaselineEnd = startTime.UnixNano() + t.Sub(startTime).Nanoseconds()
 			case <-ctx.Done():
 				return
 			}
@@ -72,7 +76,8 @@ func (b *Benchmark) Run(commandName, notes string, baselineDur time.Duration) (m
 				return
 			}
 			currentData.Err = cmd.Wait()
-			currentData.PostBaselineStart = time.Now()
+			// By adding the monotonic interval between now and the start time, we avoid clock skew.
+			currentData.PostBaselineStart = startTime.UnixNano() + time.Since(startTime).Nanoseconds()
 			timer.Reset(baselineDur)
 			// Emit post start time data.
 			select {
@@ -83,7 +88,7 @@ func (b *Benchmark) Run(commandName, notes string, baselineDur time.Duration) (m
 			// Wait for timer to expire.
 			select {
 			case t := <-timer.C:
-				currentData.PostBaselineEnd = t
+				currentData.PostBaselineEnd = startTime.UnixNano() + t.Sub(startTime).Nanoseconds()
 			case <-ctx.Done():
 				return
 			}
