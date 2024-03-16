@@ -95,11 +95,25 @@ func generateSessionID() string {
 	return strings.Replace(time.Now().UTC().Format("20060102150405.000000000"), ".", "", 1)
 }
 
+func sessionFileFor(sessionID string) string {
+	return "watt-wiser-" + sessionID + ".csv"
+}
+
+func benchmarkFileFor(sessionID string) string {
+	return "watt-wiser-" + sessionID + "-benchmarks.json"
+}
+
 func (d *Datasource) setSession(id string) {
 	d.statusSource.Update(func(oldState Status) Status {
 		oldState.SessionID = id
 		return oldState
 	})
+}
+
+func (d *Datasource) GetStatus(ctx context.Context) Status {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	return <-d.Status(ctx)
 }
 
 func (d *Datasource) setError(err error) {
@@ -138,7 +152,7 @@ func (d *Datasource) recordSession(ctx context.Context) {
 					flushAll()
 				}
 				var err error
-				sessionFile, err = os.Create("watt-wiser-" + newSessionID + ".csv")
+				sessionFile, err = os.Create(sessionFileFor(newSessionID))
 				if err != nil {
 					d.setError(err)
 					return

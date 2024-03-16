@@ -2,6 +2,10 @@ package backend
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"io/fs"
+	"log"
 	"os"
 	"os/exec"
 	"time"
@@ -99,6 +103,49 @@ func (b *Benchmark) Run(commandName, notes string, baselineDur time.Duration) (m
 				return
 			}
 			// We're done.
+			status := b.ds.GetStatus(ctx)
+			benchFile := benchmarkFileFor(status.SessionID)
+			benchmarkData, err := os.ReadFile(benchFile)
+			priorBenchmarks := []BenchmarkData{}
+			isNewFile := false
+			if errors.Is(err, fs.ErrNotExist) {
+				isNewFile = true
+			} else if err != nil {
+				log.Printf("failed opening benchmark file %q: %v", benchFile, err)
+			} else {
+				if err := json.Unmarshal(benchmarkData, &priorBenchmarks); err != nil {
+					log.Printf("failed reading benchmark file %q: %v", benchFile, err)
+					newName := benchFile + ".corrupt"
+					log.Printf("renaming corrupt benchmark file %q: %q", benchFile, newName)
+					if err := os.Rename(benchFile, newName); err != nil {
+						log.Printf("failed renaming corrupt benchmark file %q: %v", benchFile, err)
+					}
+				}
+			}
+			newName := benchFile + ".old"
+			priorBenchmarks = append(priorBenchmarks, currentData)
+			if !isNewFile {
+				if err := os.Rename(benchFile, newName); err != nil && !errors.Is(err, fs.ErrNotExist) {
+					log.Printf("failed renaming old benchmark file %q: %v", benchFile, err)
+					log.Printf("not writing new benchmark to avoid overwriting previous data")
+					return
+				}
+			}
+			newJSON, err := json.MarshalIndent(priorBenchmarks, "", "  ")
+			if err != nil {
+				log.Printf("failed marshalling new benchmark data: %v", err)
+				return
+			}
+			if err := os.WriteFile(benchFile, newJSON, 0o644); err != nil {
+				log.Printf("failed writing new benchmark data: %v", err)
+				return
+			}
+			if !isNewFile {
+				if err := os.Remove(newName); err != nil {
+					log.Printf("failed removing old benchmark file %q: %v", newName, err)
+					return
+				}
+			}
 		}()
 		return out
 	})
