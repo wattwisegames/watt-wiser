@@ -312,7 +312,12 @@ readLoop:
 			continue
 		}
 		for i := 2; i < len(relevantIndices); i++ {
-			data, err := strconv.ParseFloat(rec[relevantIndices[i]], 64)
+			record := strings.TrimSpace(rec[relevantIndices[i]])
+			if len(record) < 1 {
+				// Skip null cells.
+				continue
+			}
+			data, err := strconv.ParseFloat(record, 64)
 			if err != nil {
 				log.Printf("failed parsing data[%d]=%q: %v", i, rec[i], err)
 				continue
