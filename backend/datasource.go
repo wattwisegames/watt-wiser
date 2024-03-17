@@ -24,6 +24,13 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
+type Session struct {
+	ID   string
+	Data *RWBox[Dataset]
+	Mode Mode
+	Err  error
+}
+
 type RWBox[T any] struct {
 	t    T
 	lock sync.RWMutex
@@ -70,20 +77,11 @@ const (
 	ModeReplaying
 )
 
-type Status struct {
-	Mode      Mode
-	SessionID string
-	Err       error
-}
-
 type Datasource struct {
-	pool            *stream.MutationPool[string, *RWBox[Dataset]]
-	statusSource    *stream.Source[Status, Status]
-	watcher         *fsnotify.Watcher
-	samples         chan InputData
-	internalSamples chan InputData
-	appCtx          context.Context
-	seriesCounter   atomic.Int32
+	pool          *stream.MutationPool[string, Session]
+	watcher       *fsnotify.Watcher
+	appCtx        context.Context
+	seriesCounter atomic.Int32
 }
 
 func NewDatasource(appCtx context.Context, mutator *stream.Mutator) (*Datasource, error) {
@@ -92,20 +90,41 @@ func NewDatasource(appCtx context.Context, mutator *stream.Mutator) (*Datasource
 		return nil, fmt.Errorf("failed creating file watcher: %w", err)
 	}
 	ds := &Datasource{
-		pool: stream.NewMutationPool[string, *RWBox[Dataset]](mutator),
-		statusSource: stream.NewSource(func(s Status) (Status, bool) {
-			return s, true
-		}),
-		watcher:         watcher,
-		appCtx:          appCtx,
-		samples:         make(chan InputData, 1024),
-		internalSamples: make(chan InputData, 1024),
+		pool:    stream.NewMutationPool[string, Session](mutator),
+		watcher: watcher,
+		appCtx:  appCtx,
 	}
 	return ds, nil
 }
 
-func (d *Datasource) Status(ctx context.Context) <-chan Status {
-	return d.statusSource.Stream(ctx)
+func (d *Datasource) SessionStream(ctx context.Context) <-chan map[string]*stream.Mutation[Session] {
+	return d.pool.Stream(ctx)
+}
+
+func (d *Datasource) getMutation(ctx context.Context, sessionID string) *stream.Mutation[Session] {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	return (<-d.SessionStream(ctx))[sessionID]
+}
+
+func (d *Datasource) StreamSession(ctx context.Context, sessionID string) <-chan Session {
+	return d.getMutation(ctx, sessionID).Stream(ctx)
+}
+
+func (d *Datasource) SensingSession(ctx context.Context) Session {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	return <-stream.Filter(d.pool.Stream(ctx), func(mutations map[string]*stream.Mutation[Session]) (Session, bool) {
+		for _, m := range mutations {
+			subCtx, cancel := context.WithCancel(ctx)
+			session := <-m.Stream(subCtx)
+			cancel()
+			if session.Mode == ModeSensing {
+				return session, true
+			}
+		}
+		return Session{}, false
+	})
 }
 
 func generateSessionID() string {
@@ -120,44 +139,48 @@ func benchmarkFileFor(sessionID string) string {
 	return "watt-wiser-" + sessionID + "-benchmarks.json"
 }
 
-func (d *Datasource) setSession(id string) {
-	d.statusSource.Update(func(oldState Status) Status {
-		oldState.SessionID = id
-		return oldState
-	})
-}
-
-func (d *Datasource) GetStatus(ctx context.Context) Status {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	return <-d.Status(ctx)
-}
-
-func (d *Datasource) setError(err error) {
-	log.Printf("datasource error: %v", err)
-	d.statusSource.Update(func(oldState Status) Status {
-		oldState.Err = err
-		return oldState
-	})
-}
-
-func (d *Datasource) recordSession(sessionID string) *stream.Mutation[*RWBox[Dataset]] {
-	box, _ := stream.Mutate(d.pool, sessionID, func(ctx context.Context) (values <-chan *RWBox[Dataset]) {
-		out := make(chan *RWBox[Dataset], 1)
+func (d *Datasource) recordSession(sessionID string, mode Mode, files ...io.ReadCloser) *stream.Mutation[Session] {
+	box, _ := stream.Mutate(d.pool, sessionID, func(ctx context.Context) (values <-chan Session) {
+		out := make(chan Session, 1)
 		go func() {
 			defer close(out)
 			var data RWBox[Dataset]
+			session := Session{
+				ID:   sessionID,
+				Data: &data,
+				Mode: mode,
+				Err:  nil,
+			}
 			// Emit our boxed dataset immediately.
-			out <- &data
+			out <- session
+
+			rawSamples := make(chan InputData, 1024)
+			for _, file := range files {
+				if f, ok := file.(interface{ Name() string }); ok {
+					d.watcher.Add(f.Name())
+				}
+				go d.readSource(file, rawSamples)
+			}
+
 			var sessionFile *os.File
 			var sessionWriter *bufio.Writer
 			var csvWriter *csv.Writer
+			var err error
+			sessionFile, err = os.Create(sessionFileFor(sessionID))
+			if err != nil {
+				session.Err = err
+				out <- session
+				return
+			}
+			sessionWriter = bufio.NewWriter(sessionFile)
+			csvWriter = csv.NewWriter(sessionWriter)
 			flushAll := func() {
 				csvWriter.Flush()
 				err := sessionWriter.Flush()
 				err = errors.Join(err, sessionFile.Close())
 				if err != nil {
-					d.setError(err)
+					session.Err = err
+					out <- session
 				}
 			}
 			headings := []string{"start (ns)", "end (ns)"}
@@ -167,24 +190,11 @@ func (d *Datasource) recordSession(sessionID string) *stream.Mutation[*RWBox[Dat
 				case <-ctx.Done():
 					flushAll()
 					return
-				case sample := <-d.internalSamples:
+				case sample := <-rawSamples:
 					if sample.Kind == KindHeadings {
 						data.Write(func(d *Dataset) {
 							d.SetHeadings(sample.Headings, sample.HeadingSeries)
 						})
-						newSessionID := generateSessionID()
-						if sessionFile != nil {
-							flushAll()
-						}
-						var err error
-						sessionFile, err = os.Create(sessionFileFor(newSessionID))
-						if err != nil {
-							d.setError(err)
-							return
-						}
-						sessionWriter = bufio.NewWriter(sessionFile)
-						csvWriter = csv.NewWriter(sessionWriter)
-						d.setSession(newSessionID)
 						for sampleHeadingIdx, heading := range sample.Headings {
 							series := sample.HeadingSeries[sampleHeadingIdx]
 							localHeadingIdx := len(headings)
@@ -192,7 +202,8 @@ func (d *Datasource) recordSession(sessionID string) *stream.Mutation[*RWBox[Dat
 							seriesIDToHeading[series] = localHeadingIdx
 						}
 						if err := csvWriter.Write(headings); err != nil {
-							d.setError(err)
+							session.Err = err
+							out <- session
 							return
 						}
 					} else {
@@ -208,10 +219,12 @@ func (d *Datasource) recordSession(sessionID string) *stream.Mutation[*RWBox[Dat
 						record[1] = end
 						record[position] = val
 						if err := csvWriter.Write(record); err != nil {
-							d.setError(err)
+							session.Err = err
+							out <- session
 							return
 						}
 					}
+					out <- session
 				}
 			}
 		}()
@@ -220,41 +233,28 @@ func (d *Datasource) recordSession(sessionID string) *stream.Mutation[*RWBox[Dat
 	return box
 }
 
-func (d *Datasource) LoadFromFile(expl *explorer.Explorer) {
+func (d *Datasource) LoadFromFile(expl *explorer.Explorer) (string, error) {
 	file, err := expl.ChooseFile()
 	if err != nil {
-		d.setError(err)
-		return
+		return "", err
 	}
-	d.LoadFromStream(file)
+	return d.LoadFromStream(ModeReplaying, file), nil
 }
 
-func (d *Datasource) LoadFromStream(files ...io.ReadCloser) {
-	//TODO: Spawn a new session for this files set
-	for _, file := range files {
-		if f, ok := file.(interface{ Name() string }); ok {
-			d.watcher.Add(f.Name())
-		}
-		go d.readSource(file)
-		d.statusSource.Update(func(oldState Status) Status {
-			oldState.Mode = ModeReplaying
-			return oldState
-		})
-	}
+func (d *Datasource) LoadFromStream(mode Mode, files ...io.ReadCloser) string {
+	id := generateSessionID()
+	d.recordSession(id, mode, files...)
+	return id
 }
 
-func (d *Datasource) LaunchSensors() {
-	//TODO: Spawn a new session for this sensor run
+func (d *Datasource) LaunchSensors() (string, error) {
 	traceReader, err := launchSensors(d.appCtx)
 	if err != nil {
-		d.setError(err)
-		return
+		return "", err
 	}
-	go d.readSource(traceReader)
-	d.statusSource.Update(func(oldState Status) Status {
-		oldState.Mode = ModeSensing
-		return oldState
-	})
+	id := generateSessionID()
+	d.recordSession(id, ModeSensing, traceReader)
+	return id, nil
 }
 
 func runSensorsWithName(ctx context.Context, exeName string) (io.ReadCloser, error) {
@@ -295,13 +295,13 @@ func launchSensors(ctx context.Context) (io.ReadCloser, error) {
 	return output, nil
 }
 
-func (d *Datasource) readSource(source io.Reader) {
+func (d *Datasource) readSource(source io.Reader, samplesChan chan InputData) {
 	bufRead := NewLineReader(source)
 	csvReader := csv.NewReader(bufRead)
 	csvReader.TrimLeadingSpace = true
 	headings, err := csvReader.Read()
 	if err != nil {
-		d.setError(err)
+		log.Printf("failed reading CSV data: %v", err)
 		return
 	}
 	relevantIndices := make([]int, 2, len(headings))
@@ -327,7 +327,7 @@ func (d *Datasource) readSource(source io.Reader) {
 			}
 		}
 	}
-	d.internalSamples <- InputData{
+	samplesChan <- InputData{
 		Kind:          KindHeadings,
 		Headings:      relevantHeadings,
 		HeadingSeries: headingSeries,
@@ -372,7 +372,7 @@ readLoop:
 			if !indexIsEnergy[i] {
 				unit = sensors.Watts
 			}
-			d.internalSamples <- InputData{
+			samplesChan <- InputData{
 				Kind: KindSample,
 				Sample: Sample{
 					StartTimestampNS: startNs,

@@ -9,7 +9,6 @@ import (
 	"os"
 	"runtime/pprof"
 	"runtime/trace"
-	"sync"
 	"time"
 
 	"gioui.org/app"
@@ -75,9 +74,12 @@ Flags:
 				files = append(files, f)
 			}
 		}
-		bundle.Datasource.LoadFromStream(files...)
+		sessionID := ""
+		if len(files) > 0 {
+			sessionID = bundle.Datasource.LoadFromStream(backend.ModeSensing, files...)
+		}
 		go func() {
-			err := loop(w, bundle)
+			err := loop(w, bundle, sessionID)
 			if traceInto != "" {
 				trace.Stop()
 				f.Close()
@@ -103,26 +105,15 @@ Flags:
 
 // loop runs the top-level application event loop, connecting a UI instance to sources of data
 // and ensuring that the UI is notified of new data.
-func loop(w *app.Window, bundle backend.Bundle) error {
+func loop(w *app.Window, bundle backend.Bundle, sessionID string) error {
 	var ops op.Ops
-	var dataMutex sync.Mutex
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ws := backend.NewWindowState(ctx, bundle, w)
 
 	expl := explorer.NewExplorer(w)
-	ui := NewUI(ws, expl)
-	go func() {
-		for sample := range bundle.Datasource.Samples() {
-			func() {
-				dataMutex.Lock()
-				defer dataMutex.Unlock()
-				ui.Insert(sample)
-			}()
-			w.Invalidate()
-		}
-	}()
+	ui := NewUI(ws, expl, sessionID)
 	for {
 		ev := w.NextEvent()
 		expl.ListenEvents(ev)
@@ -131,11 +122,7 @@ func loop(w *app.Window, bundle backend.Bundle) error {
 			return ev.Err
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, ev)
-			func() {
-				dataMutex.Lock()
-				defer dataMutex.Unlock()
-				ui.Layout(gtx)
-			}()
+			ui.Layout(gtx)
 			ev.Frame(gtx.Ops)
 		}
 	}

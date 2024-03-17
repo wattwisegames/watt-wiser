@@ -285,28 +285,29 @@ type Benchmark struct {
 	disableStart  bool
 	startBtn      widget.Clickable
 	ws            backend.WindowState
+	dsBox         *backend.RWBox[backend.Dataset]
 	ds            *backend.Dataset
 	needResults   bool
 	results       []ResultSet
 	resultList    widget.List
 	resultStates  []*resultState
 
-	backendStatusStream *stream.Stream[backend.Status]
-	backendStatus       backend.Status
-	benchmarkStream     *stream.Stream[backend.BenchmarkData]
-	bd                  backend.BenchmarkData
-	status              benchmarkStatus
-	explorer            *explorer.Explorer
+	benchmarkStream *stream.Stream[backend.BenchmarkData]
+	bd              backend.BenchmarkData
+	status          benchmarkStatus
+	explorer        *explorer.Explorer
 }
 
-func NewBenchmark(ws backend.WindowState, expl *explorer.Explorer, ds *backend.Dataset) *Benchmark {
+func NewBenchmark(ws backend.WindowState, expl *explorer.Explorer) *Benchmark {
 	return &Benchmark{
-		ws:                  ws,
-		explorer:            expl,
-		ds:                  ds,
-		resultList:          widget.List{List: layout.List{Axis: layout.Vertical}},
-		backendStatusStream: stream.New(ws.Controller, ws.Bundle.Datasource.Status),
+		ws:         ws,
+		explorer:   expl,
+		resultList: widget.List{List: layout.List{Axis: layout.Vertical}},
 	}
+}
+
+func (b *Benchmark) SetDataset(ds *backend.RWBox[backend.Dataset]) {
+	b.dsBox = ds
 }
 
 func (b *Benchmark) Update(gtx C, th *material.Theme) {
@@ -328,9 +329,6 @@ func (b *Benchmark) Update(gtx C, th *material.Theme) {
 			}
 		}
 	}
-	b.backendStatusStream.ReadInto(gtx, &b.backendStatus, backend.Status{
-		Mode: backend.ModeNone,
-	})
 	data, isNew := b.benchmarkStream.ReadNew(gtx)
 	if isNew {
 		b.bd = data
@@ -436,64 +434,72 @@ func (b *Benchmark) computeResults() {
 }
 
 func (b *Benchmark) Layout(gtx C, th *material.Theme) D {
-	inset := layout.UniformInset(2)
-	b.Update(gtx, th)
-	return layout.Flex{
-		Axis: layout.Vertical,
-	}.Layout(gtx,
-		layout.Rigid(func(gtx C) D {
-			return layout.Flex{
-				Alignment: layout.Baseline,
-			}.Layout(gtx,
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return b.commandEditor.Layout(gtx, th, "Executable to benchmark")
-					})
-				}),
-				layout.Rigid(func(gtx C) D {
-					return inset.Layout(gtx, material.Button(th, &b.chooseFileBtn, "Browse").Layout)
-				}),
-			)
-		}),
-		layout.Rigid(func(gtx C) D {
-			return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return b.notesEditor.Layout(gtx, th, "Benchmark Notes")
-			})
-		}),
-		layout.Rigid(func(gtx C) D {
-			return layout.Flex{
-				Alignment: layout.Baseline,
-			}.Layout(gtx,
-				layout.Flexed(1, func(gtx C) D {
-					return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						btn := material.Button(th, &b.startBtn, "Start")
-						if b.disableStart || b.commandEditor.Len() == 0 {
-							gtx = gtx.Disabled()
-						}
-						return btn.Layout(gtx)
-					})
-				}),
-				layout.Flexed(1, func(gtx C) D {
-					return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						l := material.Body1(th, "Status: "+b.status.String())
-						if b.bd.Err != nil {
-							l.Text += " " + b.bd.Err.Error()
-						}
-						return l.Layout(gtx)
-					})
-				}),
-			)
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return material.List(th, &b.resultList).Layout(gtx, len(b.results), func(gtx layout.Context, index int) layout.Dimensions {
-				res := b.results[index]
+	var dims D
+	b.dsBox.Read(func(d *backend.Dataset) {
+		b.ds = d
+		defer func() {
+			b.ds = nil
+		}()
+		inset := layout.UniformInset(2)
+		b.Update(gtx, th)
+		dims = layout.Flex{
+			Axis: layout.Vertical,
+		}.Layout(gtx,
+			layout.Rigid(func(gtx C) D {
+				return layout.Flex{
+					Alignment: layout.Baseline,
+				}.Layout(gtx,
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return b.commandEditor.Layout(gtx, th, "Executable to benchmark")
+						})
+					}),
+					layout.Rigid(func(gtx C) D {
+						return inset.Layout(gtx, material.Button(th, &b.chooseFileBtn, "Browse").Layout)
+					}),
+				)
+			}),
+			layout.Rigid(func(gtx C) D {
+				return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return b.notesEditor.Layout(gtx, th, "Benchmark Notes")
+				})
+			}),
+			layout.Rigid(func(gtx C) D {
+				return layout.Flex{
+					Alignment: layout.Baseline,
+				}.Layout(gtx,
+					layout.Flexed(1, func(gtx C) D {
+						return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							btn := material.Button(th, &b.startBtn, "Start")
+							if b.disableStart || b.commandEditor.Len() == 0 {
+								gtx = gtx.Disabled()
+							}
+							return btn.Layout(gtx)
+						})
+					}),
+					layout.Flexed(1, func(gtx C) D {
+						return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							l := material.Body1(th, "Status: "+b.status.String())
+							if b.bd.Err != nil {
+								l.Text += " " + b.bd.Err.Error()
+							}
+							return l.Layout(gtx)
+						})
+					}),
+				)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return material.List(th, &b.resultList).Layout(gtx, len(b.results), func(gtx layout.Context, index int) layout.Dimensions {
+					res := b.results[index]
 
-				gtx.Constraints.Min.Y = 0
-				for len(b.resultStates) <= index {
-					b.resultStates = append(b.resultStates, &resultState{})
-				}
-				return result(th, b.resultStates[index], res, b.ds).Layout(gtx)
-			})
-		}),
-	)
+					gtx.Constraints.Min.Y = 0
+					for len(b.resultStates) <= index {
+						b.resultStates = append(b.resultStates, &resultState{})
+					}
+					return result(th, b.resultStates[index], res, b.ds).Layout(gtx)
+				})
+			}),
+		)
+	})
+	return dims
 }

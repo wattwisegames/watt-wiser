@@ -103,8 +103,8 @@ func (b *Benchmark) Run(commandName, notes string, baselineDur time.Duration) (m
 				return
 			}
 			// We're done.
-			status := b.ds.GetStatus(ctx)
-			benchFile := benchmarkFileFor(status.SessionID)
+			session := b.ds.SensingSession(ctx)
+			benchFile := benchmarkFileFor(session.ID)
 			benchmarkData, err := os.ReadFile(benchFile)
 			priorBenchmarks := []BenchmarkData{}
 			isNewFile := false

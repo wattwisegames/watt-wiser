@@ -45,6 +45,8 @@ type timeslice struct {
 }
 
 type ChartData struct {
+	dsBox *backend.RWBox[backend.Dataset]
+	// Dataset is only populated temporarily while the box lock is held.
 	*backend.Dataset
 	seriesSlices [][]timeslice
 	Enabled      []*widget.Bool
@@ -66,11 +68,14 @@ type ChartData struct {
 	isHovered bool
 }
 
-func NewChart(ds *backend.Dataset) *ChartData {
+func NewChart() *ChartData {
 	return &ChartData{
-		Dataset: ds,
 		nsPerDp: 10_000_000,
 	}
+}
+
+func (c *ChartData) SetDataset(ds *backend.RWBox[backend.Dataset]) {
+	c.dsBox = ds
 }
 
 var colors = []color.NRGBA{
@@ -204,95 +209,104 @@ func (c *ChartData) Update(gtx C) {
 }
 
 func (c *ChartData) Layout(gtx C, th *material.Theme) D {
-	c.Update(gtx)
-	if len(c.Series) < 1 {
-		return D{Size: gtx.Constraints.Max}
-	}
-	minRangeLabel := material.Body1(th, strconv.FormatFloat(0, 'f', 3, 64))
-	origConstraints := gtx.Constraints
-	gtx.Constraints.Min = image.Point{}
+	var dims D
+	c.dsBox.Read(func(d *backend.Dataset) {
+		c.Dataset = d
+		defer func() {
+			c.Dataset = nil
+		}()
+		c.Update(gtx)
+		if len(c.Series) < 1 {
+			dims = D{Size: gtx.Constraints.Max}
+			return
+		}
+		minRangeLabel := material.Body1(th, strconv.FormatFloat(0, 'f', 3, 64))
+		origConstraints := gtx.Constraints
+		gtx.Constraints.Min = image.Point{}
 
-	// Determine the amount of space to reserve for axis labels.
-	macro := op.Record(gtx.Ops)
-	axisLabelDims := minRangeLabel.Layout(gtx)
-	_ = macro.Stop()
+		// Determine the amount of space to reserve for axis labels.
+		macro := op.Record(gtx.Ops)
+		axisLabelDims := minRangeLabel.Layout(gtx)
+		_ = macro.Stop()
 
-	// Determine the space occupied by the key.
-	macro = op.Record(gtx.Ops)
-	gtx.Constraints.Min.X = gtx.Constraints.Max.X
-	keyDims := c.layoutControls(gtx, th)
-	keyCall := macro.Stop()
+		// Determine the space occupied by the key.
+		macro = op.Record(gtx.Ops)
+		gtx.Constraints.Min.X = gtx.Constraints.Max.X
+		keyDims := c.layoutControls(gtx, th)
+		keyCall := macro.Stop()
 
-	// Lay out the plot in the remaining space after accounting for axis
-	// labels and the key.
-	gtx.Constraints = origConstraints.SubMax(image.Point{
-		X: axisLabelDims.Size.Y * 2,
-		Y: axisLabelDims.Size.Y,
-	}.Add(image.Pt(0, keyDims.Size.Y)))
-	macro = op.Record(gtx.Ops)
-	dims, domainMin, domainMax, pxPerWatt, rangeMin, rangeMax := c.layoutPlot(gtx, th)
-	domainEndSecs := float64(domainMax-c.DomainMax) / 1_000_000_000
-	domainIntervalSecs := float64(domainMax-domainMin) / 1_000_000_000
-	domainStartSecs := domainEndSecs - domainIntervalSecs
-	plotCall := macro.Stop()
-	gtx.Constraints = origConstraints
-	minDomainLabel := material.Body1(th, strconv.FormatFloat(domainStartSecs, 'f', 3, 64)+"s")
-	maxDomainLabel := material.Body1(th, strconv.FormatFloat(domainEndSecs, 'f', 3, 64)+"s")
-	xAxisLabel := material.Body2(th, fmt.Sprintf("Time (spans %.2f s, scale = %d ns/Dp)", domainIntervalSecs, c.nsPerDp))
-	xAxisLabel.MaxLines = 1
-	xAxisLabel.Alignment = text.Middle
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{Axis: layout.Vertical, Spacing: layout.SpaceBetween}.Layout(gtx,
-						layout.Flexed(1, func(gtx C) D {
-							gtx.Constraints.Min = image.Point{}
-							gtx.Constraints.Max.X = axisLabelDims.Size.Y * 2
-							return c.layoutYAxisLabels(gtx, th, pxPerWatt, rangeMin, rangeMax)
-						}),
-						layout.Rigid(func(gtx C) D {
-							gtx.Constraints = layout.Exact(image.Point{
-								X: axisLabelDims.Size.Y * 2,
-								Y: axisLabelDims.Size.Y,
-							})
-							icon := pauseIcon
-							if c.paused {
-								icon = playIcon
-							}
-							return material.Clickable(gtx, &c.pauseBtn, func(gtx layout.Context) layout.Dimensions {
-								return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-									return icon.Layout(gtx, th.Fg)
+		// Lay out the plot in the remaining space after accounting for axis
+		// labels and the key.
+		gtx.Constraints = origConstraints.SubMax(image.Point{
+			X: axisLabelDims.Size.Y * 2,
+			Y: axisLabelDims.Size.Y,
+		}.Add(image.Pt(0, keyDims.Size.Y)))
+		macro = op.Record(gtx.Ops)
+		dims, domainMin, domainMax, pxPerWatt, rangeMin, rangeMax := c.layoutPlot(gtx, th)
+		domainEndSecs := float64(domainMax-c.DomainMax) / 1_000_000_000
+		domainIntervalSecs := float64(domainMax-domainMin) / 1_000_000_000
+		domainStartSecs := domainEndSecs - domainIntervalSecs
+		plotCall := macro.Stop()
+		gtx.Constraints = origConstraints
+		minDomainLabel := material.Body1(th, strconv.FormatFloat(domainStartSecs, 'f', 3, 64)+"s")
+		maxDomainLabel := material.Body1(th, strconv.FormatFloat(domainEndSecs, 'f', 3, 64)+"s")
+		xAxisLabel := material.Body2(th, fmt.Sprintf("Time (spans %.2f s, scale = %d ns/Dp)", domainIntervalSecs, c.nsPerDp))
+		xAxisLabel.MaxLines = 1
+		xAxisLabel.Alignment = text.Middle
+		dims = layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return layout.Flex{Axis: layout.Vertical, Spacing: layout.SpaceBetween}.Layout(gtx,
+							layout.Flexed(1, func(gtx C) D {
+								gtx.Constraints.Min = image.Point{}
+								gtx.Constraints.Max.X = axisLabelDims.Size.Y * 2
+								return c.layoutYAxisLabels(gtx, th, pxPerWatt, rangeMin, rangeMax)
+							}),
+							layout.Rigid(func(gtx C) D {
+								gtx.Constraints = layout.Exact(image.Point{
+									X: axisLabelDims.Size.Y * 2,
+									Y: axisLabelDims.Size.Y,
 								})
-							})
-						}),
-					)
-				}),
-				layout.Flexed(1, func(gtx C) D {
-					return layout.Flex{Axis: layout.Vertical, Spacing: layout.SpaceBetween}.Layout(gtx,
-						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-							plotCall.Add(gtx.Ops)
-							return dims
-						}),
-						layout.Rigid(func(gtx C) D {
-							return layout.Flex{
-								Axis:      layout.Horizontal,
-								Alignment: layout.Baseline,
-							}.Layout(gtx,
-								layout.Rigid(minDomainLabel.Layout),
-								layout.Flexed(1, xAxisLabel.Layout),
-								layout.Rigid(maxDomainLabel.Layout),
-							)
-						}),
-					)
-				}),
-			)
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			keyCall.Add(gtx.Ops)
-			return keyDims
-		}),
-	)
+								icon := pauseIcon
+								if c.paused {
+									icon = playIcon
+								}
+								return material.Clickable(gtx, &c.pauseBtn, func(gtx layout.Context) layout.Dimensions {
+									return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+										return icon.Layout(gtx, th.Fg)
+									})
+								})
+							}),
+						)
+					}),
+					layout.Flexed(1, func(gtx C) D {
+						return layout.Flex{Axis: layout.Vertical, Spacing: layout.SpaceBetween}.Layout(gtx,
+							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+								plotCall.Add(gtx.Ops)
+								return dims
+							}),
+							layout.Rigid(func(gtx C) D {
+								return layout.Flex{
+									Axis:      layout.Horizontal,
+									Alignment: layout.Baseline,
+								}.Layout(gtx,
+									layout.Rigid(minDomainLabel.Layout),
+									layout.Flexed(1, xAxisLabel.Layout),
+									layout.Rigid(maxDomainLabel.Layout),
+								)
+							}),
+						)
+					}),
+				)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				keyCall.Add(gtx.Ops)
+				return keyDims
+			}),
+		)
+	})
+	return dims
 }
 
 func (c *ChartData) layoutControls(gtx C, th *material.Theme) D {

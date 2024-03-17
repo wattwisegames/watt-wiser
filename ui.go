@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"image"
 	"image/color"
 
@@ -28,9 +29,10 @@ const (
 
 // UI is responsible for holding the state of and drawing the top-level UI.
 type UI struct {
-	ws   backend.WindowState
-	expl *explorer.Explorer
-	ds   backend.Dataset
+	ws            backend.WindowState
+	expl          *explorer.Explorer
+	sessionStream *stream.Stream[backend.Session]
+	session       backend.Session
 
 	chart       *ChartData
 	benchmark   *Benchmark
@@ -40,23 +42,25 @@ type UI struct {
 	launching   bool
 	sensorsErr  string
 
-	th           *material.Theme
-	statusStream *stream.Stream[backend.Status]
-	status       backend.Status
+	th *material.Theme
 }
 
-func NewUI(ws backend.WindowState, expl *explorer.Explorer) *UI {
+func NewUI(ws backend.WindowState, expl *explorer.Explorer, sessionID string) *UI {
 	th := material.NewTheme()
 	th.Shaper = text.NewShaper(text.WithCollection(gofont.Collection()), text.NoSystemFonts())
 	ui := &UI{
-		ws:           ws,
-		th:           th,
-		expl:         expl,
-		tab:          widget.Enum{Value: tabMonitor},
-		statusStream: stream.New(ws.Controller, ws.Bundle.Datasource.Status),
+		ws:   ws,
+		th:   th,
+		expl: expl,
+		tab:  widget.Enum{Value: tabMonitor},
 	}
-	ui.chart = NewChart(&ui.ds)
-	ui.benchmark = NewBenchmark(ws, expl, &ui.ds)
+	if sessionID != "" {
+		ui.sessionStream = stream.New(ws.Controller, func(ctx context.Context) <-chan backend.Session {
+			return ws.Bundle.Datasource.StreamSession(ctx, sessionID)
+		})
+	}
+	ui.chart = NewChart()
+	ui.benchmark = NewBenchmark(ws, expl)
 	return ui
 }
 
@@ -67,30 +71,17 @@ type (
 	}
 )
 
-// Insert adds a datapoint to the UI's visualization.
-func (ui *UI) Insert(sample backend.InputData) {
-	switch sample.Kind {
-	case backend.KindHeadings:
-		ui.ds.SetHeadings(sample.Headings, sample.HeadingSeries)
-	case backend.KindSample:
-		ui.ds.Insert(sample.Sample)
-	}
-}
-
 // Update the state of the UI and generate events. Must be called until the second parameter
 // (indicating the presence/absence of an event) returns false each frame.
 func (ui *UI) Update(gtx C) {
-	ui.statusStream.ReadInto(gtx, &ui.status, backend.Status{})
-	switch ui.status.Mode {
-	case backend.ModeReplaying:
-		ui.chart.Update(gtx)
-	case backend.ModeSensing:
-		ui.chart.Update(gtx)
-		ui.benchmark.Update(gtx, ui.th)
+	if session, isNew := ui.sessionStream.ReadNew(gtx); isNew {
+		ui.session = session
+		ui.chart.SetDataset(session.Data)
+		ui.benchmark.SetDataset(session.Data)
 	}
 	ui.tab.Update(gtx)
-	if ui.status.Err != nil {
-		ui.sensorsErr = ui.status.Err.Error()
+	if ui.session.Err != nil {
+		ui.sensorsErr = ui.session.Err.Error()
 	}
 	if !ui.launching && ui.launchBtn.Clicked(gtx) {
 		ui.launching = true
@@ -205,7 +196,7 @@ func (ui *UI) layoutStartScreen(gtx C) D {
 // Layout the UI into the provided context.
 func (ui *UI) Layout(gtx C) D {
 	ui.Update(gtx)
-	if ui.ds.Initialized() {
+	if ui.session.ID != "" {
 		return ui.layoutMainArea(gtx)
 	}
 	return ui.layoutStartScreen(gtx)
