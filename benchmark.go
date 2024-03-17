@@ -297,7 +297,6 @@ type Benchmark struct {
 	bd                  backend.BenchmarkData
 	status              benchmarkStatus
 	explorer            *explorer.Explorer
-	table               component.GridState
 }
 
 func NewBenchmark(ws backend.WindowState, expl *explorer.Explorer, ds *backend.Dataset) *Benchmark {
