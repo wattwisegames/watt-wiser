@@ -173,6 +173,7 @@ func (c *ChartData) layoutYAxisLabels(gtx C, th *material.Theme, pxPerWatt int, 
 }
 
 func (c *ChartData) Update(gtx C) {
+	_, domainMax := c.Domain()
 	for len(c.Enabled) < len(c.Series) {
 		c.Enabled = append(c.Enabled, &widget.Bool{Value: true})
 	}
@@ -181,7 +182,7 @@ func (c *ChartData) Update(gtx C) {
 	}
 	if c.pauseBtn.Clicked(gtx) {
 		c.paused = !c.paused
-		c.xOrigin = c.DomainMax + c.xOffset
+		c.xOrigin = domainMax + c.xOffset
 		c.xOffset = 0
 	}
 	c.Stacked.Update(gtx)
@@ -224,6 +225,7 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 		origConstraints := gtx.Constraints
 		gtx.Constraints.Min = image.Point{}
 
+		_, dataDomainMax := c.Domain()
 		// Determine the amount of space to reserve for axis labels.
 		macro := op.Record(gtx.Ops)
 		axisLabelDims := minRangeLabel.Layout(gtx)
@@ -243,7 +245,7 @@ func (c *ChartData) Layout(gtx C, th *material.Theme) D {
 		}.Add(image.Pt(0, keyDims.Size.Y)))
 		macro = op.Record(gtx.Ops)
 		dims, domainMin, domainMax, pxPerWatt, rangeMin, rangeMax := c.layoutPlot(gtx, th)
-		domainEndSecs := float64(domainMax-c.DomainMax) / 1_000_000_000
+		domainEndSecs := float64(domainMax-dataDomainMax) / 1_000_000_000
 		domainIntervalSecs := float64(domainMax-domainMin) / 1_000_000_000
 		domainStartSecs := domainEndSecs - domainIntervalSecs
 		plotCall := macro.Stop()
@@ -469,22 +471,23 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 	if dist != 0 {
 		pannedNS += int64(gtx.Metric.PxToDp(dist) * unit.Dp(c.nsPerDp))
 	}
-	totalDomainInterval := c.DomainMax - c.DomainMin
+	dataDomainMin, dataDomainMax := c.Domain()
+	totalDomainInterval := dataDomainMax - dataDomainMin
 	if panDist := c.panBar.ScrollDistance(); panDist != 0 {
 		pannedNS += int64(panDist * float32(totalDomainInterval))
 	}
-	origin := c.DomainMax
+	origin := dataDomainMax
 	if c.paused {
 		origin = c.xOrigin
 	}
 	if pannedNS != 0 {
-		if endCandidate := origin + c.xOffset + pannedNS; endCandidate >= c.DomainMin && endCandidate <= c.DomainMax {
+		if endCandidate := origin + c.xOffset + pannedNS; endCandidate >= dataDomainMin && endCandidate <= dataDomainMax {
 			c.xOffset += pannedNS
 		}
 	}
 	maxVisibleX := origin + c.xOffset
-	if maxVisibleX > c.DomainMax {
-		maxVisibleX = c.DomainMax
+	if maxVisibleX > dataDomainMax {
+		maxVisibleX = dataDomainMax
 	}
 	numDp := gtx.Metric.PxToDp(gtx.Constraints.Max.X)
 	visibleDomainInterval := int64(math.Round(float64(numDp * unit.Dp(c.nsPerDp))))
@@ -495,8 +498,8 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 	var maxY int
 	maxY, pxPerWatt, rangeMax = c.computeRange(gtx)
 	c.computeVisible(gtx, maxY, visibleDomainStart, visibleDomainEnd, rangeMax)
-	end := visibleDomainEnd - c.DomainMin
-	start := visibleDomainStart - c.DomainMin
+	end := visibleDomainEnd - dataDomainMin
+	start := visibleDomainStart - dataDomainMin
 	vpStart := float32(start) / float32(totalDomainInterval)
 	vpEnd := float32(end) / float32(totalDomainInterval)
 

@@ -12,8 +12,10 @@ type Series struct {
 	endTimestamps              []int64
 	values                     []float64
 	RangeRateMax, RangeRateMin float64
+	domainMin, domainMax       int64
 	Sum                        float64
 	name                       string
+	initialized                bool
 }
 
 func NewSeries(name string) *Series {
@@ -24,14 +26,29 @@ func (s *Series) Name() string {
 	return s.name
 }
 
+func (s *Series) Initialized() bool {
+	return s.initialized
+}
+
+func (s *Series) Domain() (min int64, max int64) {
+	return s.domainMin, s.domainMax
+}
+
 // Insert adds a value at a given timestamp to the series. In the event
 // that the series already contains a value at that time, nothing is added
 // and the method returns false. Otherwise, the method returns true.
 func (s *Series) Insert(sample Sample) (inserted bool) {
+	if !s.initialized {
+		s.domainMin = sample.StartTimestampNS
+		s.domainMax = sample.StartTimestampNS
+		s.initialized = true
+	}
 	if len(s.endTimestamps) > 0 && s.endTimestamps[len(s.endTimestamps)-1] > sample.StartTimestampNS {
 		// Reject samples with times overlapping the existing data in the series.
 		return false
 	}
+	s.domainMin = min(sample.StartTimestampNS, s.domainMin)
+	s.domainMax = max(sample.EndTimestampNS, s.domainMax)
 	var rate float64
 	var quantity float64
 	duration := float64(sample.EndTimestampNS - sample.StartTimestampNS)

@@ -1,17 +1,27 @@
 package backend
 
 type Dataset struct {
-	DomainMin int64
-	DomainMax int64
-	Series    []*Series
+	Series []*Series
 	// seriesMapping maps from series identifiers used by the backend to
 	// the index of a series in this structure.
 	seriesMapping map[int]int
-	initialized   bool
 }
 
 func (d *Dataset) Initialized() bool {
-	return d.initialized
+	init := true
+	for _, s := range d.Series {
+		init = init && s.Initialized()
+	}
+	return init
+}
+
+func (d *Dataset) Domain() (dMin int64, dMax int64) {
+	for _, s := range d.Series {
+		sMin, sMax := s.Domain()
+		dMin = min(sMin, dMin)
+		dMax = max(sMax, dMax)
+	}
+	return dMin, dMax
 }
 
 // SetHeadings populates the headings for a dataset. It must be invoked at least once
@@ -33,13 +43,6 @@ func (d *Dataset) SetHeadings(headings []string, series []int) {
 // Insert the sample. Will panic if the sample's Series does not have a heading previously
 // registered via [SetHeadings].
 func (c *Dataset) Insert(sample Sample) {
-	if !c.initialized {
-		c.DomainMin = sample.StartTimestampNS
-		c.DomainMax = sample.StartTimestampNS
-		c.initialized = true
-	}
 	localIdx := c.seriesMapping[sample.Series]
 	c.Series[localIdx].Insert(sample)
-	c.DomainMin = min(sample.StartTimestampNS, c.DomainMin)
-	c.DomainMax = max(sample.EndTimestampNS, c.DomainMax)
 }
