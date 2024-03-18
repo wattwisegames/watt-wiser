@@ -173,10 +173,10 @@ func (c *ChartData) layoutYAxisLabels(gtx C, th *material.Theme, pxPerWatt int, 
 }
 
 func (c *ChartData) Update(gtx C) {
-	for len(c.Enabled) < len(c.Headings) {
+	for len(c.Enabled) < len(c.Series) {
 		c.Enabled = append(c.Enabled, &widget.Bool{Value: true})
 	}
-	for len(c.seriesSlices) < len(c.Headings) {
+	for len(c.seriesSlices) < len(c.Series) {
 		c.seriesSlices = append(c.seriesSlices, nil)
 	}
 	if c.pauseBtn.Clicked(gtx) {
@@ -326,7 +326,7 @@ func (c *ChartData) layoutControls(gtx C, th *material.Theme) D {
 		totalWattHoursCol
 		numCols
 	)
-	return table.Layout(gtx, len(c.Headings)+1, numCols,
+	return table.Layout(gtx, len(c.Series)+1, numCols,
 		func(axis layout.Axis, index, constraint int) int {
 			if axis == layout.Vertical {
 				return min(constraint, rowHeight)
@@ -377,7 +377,7 @@ func (c *ChartData) layoutControls(gtx C, th *material.Theme) D {
 				dims.Size = gtx.Constraints.Constrain(dims.Size)
 			}()
 			dims = layout.UniformInset(2).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				if row == len(c.Headings) {
+				if row == len(c.Series) {
 					switch col {
 					case colorCol:
 						return layout.Dimensions{Size: gtx.Constraints.Min}
@@ -426,7 +426,7 @@ func (c *ChartData) layoutControls(gtx C, th *material.Theme) D {
 						})
 					})
 				case seriesNameCol:
-					l := material.Body2(th, c.Headings[row])
+					l := material.Body2(th, c.Series[row].Name())
 					if !enabled {
 						l.Color.A = disabledAlpha
 					}

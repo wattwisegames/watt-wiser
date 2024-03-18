@@ -3,8 +3,7 @@ package backend
 type Dataset struct {
 	DomainMin int64
 	DomainMax int64
-	Series    []Series
-	Headings  []string
+	Series    []*Series
 	// seriesMapping maps from series identifiers used by the backend to
 	// the index of a series in this structure.
 	seriesMapping map[int]int
@@ -25,11 +24,10 @@ func (d *Dataset) SetHeadings(headings []string, series []int) {
 	if d.seriesMapping == nil {
 		d.seriesMapping = make(map[int]int)
 	}
-	for _, identifier := range series {
+	for i, identifier := range series {
 		d.seriesMapping[identifier] = len(d.Series)
-		d.Series = append(d.Series, Series{})
+		d.Series = append(d.Series, NewSeries(headings[i]))
 	}
-	d.Headings = append(d.Headings, headings...)
 }
 
 // Insert the sample. Will panic if the sample's Series does not have a heading previously

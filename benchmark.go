@@ -6,7 +6,6 @@ import (
 	"image/color"
 	"log"
 	"os"
-	"slices"
 	"time"
 
 	"gioui.org/layout"
@@ -261,7 +260,7 @@ func (r resultStyle) Layout(gtx C) D {
 								l.MaxLines = 1
 								return l.Layout(gtx)
 							} else if col == 1 {
-								l := material.Body1(r.th, r.ds.Headings[row%len(r.ds.Series)])
+								l := material.Body1(r.th, r.ds.Series[row%len(r.ds.Series)].Name())
 								l.MaxLines = 1
 								return l.Layout(gtx)
 							}
@@ -365,7 +364,11 @@ func (b *Benchmark) computeResults() {
 	if !b.needResults {
 		return
 	}
-	series := slices.Clone(b.ds.Headings)
+	series := make([]string, len(b.ds.Series))
+	for i, s := range b.ds.Series {
+		series[i] = s.Name()
+	}
+
 	sectionsCount := 4
 	rows := len(series) * sectionsCount
 	baselines := make([]float64, len(series))

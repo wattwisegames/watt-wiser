@@ -13,6 +13,15 @@ type Series struct {
 	values                     []float64
 	RangeRateMax, RangeRateMin float64
 	Sum                        float64
+	name                       string
+}
+
+func NewSeries(name string) *Series {
+	return &Series{name: name}
+}
+
+func (s *Series) Name() string {
+	return s.name
 }
 
 // Insert adds a value at a given timestamp to the series. In the event
