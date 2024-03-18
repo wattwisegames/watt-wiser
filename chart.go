@@ -389,7 +389,7 @@ func (c *ChartData) layoutControls(gtx C, th *material.Theme) D {
 						sum := 0.0
 						for sumIdx, series := range c.Series {
 							if c.Enabled[sumIdx].Value {
-								sum += series.Sum
+								sum += series.Sum()
 							}
 						}
 						l := material.Body2(th, fmt.Sprintf("%.2f", sum))
@@ -399,7 +399,7 @@ func (c *ChartData) layoutControls(gtx C, th *material.Theme) D {
 						sum := 0.0
 						for sumIdx, series := range c.Series {
 							if c.Enabled[sumIdx].Value {
-								sum += series.Sum
+								sum += series.Sum()
 							}
 						}
 						sum = sum / 3600
@@ -434,14 +434,14 @@ func (c *ChartData) layoutControls(gtx C, th *material.Theme) D {
 					}
 					return l.Layout(gtx)
 				case totalJoulesCol:
-					l := material.Body2(th, fmt.Sprintf("%.2f", c.Series[row].Sum))
+					l := material.Body2(th, fmt.Sprintf("%.2f", c.Series[row].Sum()))
 					if !enabled {
 						l.Color.A = disabledAlpha
 					}
 					l.Alignment = text.End
 					return l.Layout(gtx)
 				case totalWattHoursCol:
-					l := material.Body2(th, fmt.Sprintf("%.4f", c.Series[row].Sum/3600))
+					l := material.Body2(th, fmt.Sprintf("%.4f", c.Series[row].Sum()/3600))
 					if !enabled {
 						l.Color.A = disabledAlpha
 					}

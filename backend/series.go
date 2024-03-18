@@ -13,7 +13,7 @@ type Series struct {
 	values                     []float64
 	RangeRateMax, RangeRateMin float64
 	domainMin, domainMax       int64
-	Sum                        float64
+	sum                        float64
 	name                       string
 	initialized                bool
 }
@@ -32,6 +32,10 @@ func (s *Series) Initialized() bool {
 
 func (s *Series) Domain() (min int64, max int64) {
 	return s.domainMin, s.domainMax
+}
+
+func (s *Series) Sum() float64 {
+	return s.sum
 }
 
 // Insert adds a value at a given timestamp to the series. In the event
@@ -72,7 +76,7 @@ func (s *Series) Insert(sample Sample) (inserted bool) {
 	s.endTimestamps = append(s.endTimestamps, sample.EndTimestampNS)
 	s.values = append(s.values, quantity)
 
-	s.Sum += quantity
+	s.sum += quantity
 	return true
 }
 
