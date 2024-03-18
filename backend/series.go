@@ -11,7 +11,7 @@ type Series struct {
 	startTimestamps            []int64
 	endTimestamps              []int64
 	values                     []float64
-	RangeRateMax, RangeRateMin float64
+	rangeRateMax, rangeRateMin float64
 	domainMin, domainMax       int64
 	sum                        float64
 	name                       string
@@ -32,6 +32,10 @@ func (s *Series) Initialized() bool {
 
 func (s *Series) Domain() (min int64, max int64) {
 	return s.domainMin, s.domainMax
+}
+
+func (s *Series) RateRange() (min float64, max float64) {
+	return s.rangeRateMin, s.rangeRateMax
 }
 
 func (s *Series) Sum() float64 {
@@ -66,11 +70,11 @@ func (s *Series) Insert(sample Sample) (inserted bool) {
 	}
 
 	if len(s.startTimestamps) < 1 {
-		s.RangeRateMax = rate
-		s.RangeRateMin = rate
+		s.rangeRateMax = rate
+		s.rangeRateMin = rate
 	} else {
-		s.RangeRateMax = max(s.RangeRateMax, rate)
-		s.RangeRateMin = min(s.RangeRateMin, rate)
+		s.rangeRateMax = max(s.rangeRateMax, rate)
+		s.rangeRateMin = min(s.rangeRateMin, rate)
 	}
 	s.startTimestamps = append(s.startTimestamps, sample.StartTimestampNS)
 	s.endTimestamps = append(s.endTimestamps, sample.EndTimestampNS)

@@ -631,8 +631,9 @@ func (c *ChartData) computeRange(gtx C) (maxY, pxPerWatt int, rangeMax float64) 
 		if !c.Enabled[i].Value {
 			continue
 		}
-		rangeMax = max(rangeMax, series.RangeRateMax)
-		rangeSum += series.RangeRateMax
+		_, seriesRateMax := series.RateRange()
+		rangeMax = max(rangeMax, seriesRateMax)
+		rangeSum += seriesRateMax
 	}
 	if c.Stacked.Value {
 		rangeMax = rangeSum
