@@ -1,7 +1,17 @@
 package backend
 
+type DataSeries interface {
+	Name() string
+	Initialized() bool
+	Domain() (min int64, max int64)
+	Insert(sample Sample) (inserted bool)
+	RatesBetween(timestampA, timestampB int64) (maximum, mean, minimum, sum float64, ok bool)
+	Sum() float64
+	RateRange() (min float64, max float64)
+}
+
 type Dataset struct {
-	Series []*Series
+	Series []DataSeries
 	// seriesMapping maps from series identifiers used by the backend to
 	// the index of a series in this structure.
 	seriesMapping map[int]int
