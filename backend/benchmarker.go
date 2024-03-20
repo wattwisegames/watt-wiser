@@ -2,12 +2,15 @@ package backend
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io/fs"
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"git.sr.ht/~gioverse/skel/stream"
@@ -26,10 +29,37 @@ func NewBenchmark(mutator *stream.Mutator, ds *Datasource) *Benchmark {
 }
 
 type BenchmarkData struct {
+	SessionID                                                            string
+	BenchmarkID                                                          string
 	Command                                                              string
 	Notes                                                                string
 	PreBaselineStart, PreBaselineEnd, PostBaselineStart, PostBaselineEnd int64
 	Err                                                                  error
+}
+
+func (b *Benchmark) StreamDatasetForBenchmarks(ctx context.Context, benchmarks ...BenchmarkData) <-chan Dataset {
+	sessionsToBenchmarks := map[string][]BenchmarkData{}
+	for _, b := range benchmarks {
+		sessionsToBenchmarks[b.SessionID] = append(sessionsToBenchmarks[b.SessionID], b)
+	}
+	for sessionID, benchmarks := range sessionsToBenchmarks {
+		return stream.Transform(b.ds.StreamSession(ctx, sessionID), func(s Session) Dataset {
+			ds := Dataset{}
+			for _, benchmark := range benchmarks {
+				for _, series := range s.Data {
+					ds = append(ds, NewBenchmarkSeriesFrom(series, benchmark))
+				}
+			}
+			return ds
+		})
+	}
+	return nil
+}
+
+func randomIDString() string {
+	var buf [4]byte
+	_, _ = rand.Read(buf[:])
+	return strings.ReplaceAll(base64.StdEncoding.EncodeToString(buf[:]), "=", "")
 }
 
 func (b *Benchmark) Run(commandName, notes string, baselineDur time.Duration) (mutation *stream.Mutation[BenchmarkData], isNew bool) {
@@ -41,7 +71,10 @@ func (b *Benchmark) Run(commandName, notes string, baselineDur time.Duration) (m
 			cmd.Stderr = os.Stderr
 			cmd.Stdout = os.Stdout
 			startTime := time.Now()
+			session := b.ds.SensingSession(ctx)
 			currentData := BenchmarkData{
+				SessionID:        session.ID,
+				BenchmarkID:      randomIDString(),
 				Command:          commandName,
 				Notes:            notes,
 				PreBaselineStart: startTime.UnixNano(),
@@ -103,7 +136,6 @@ func (b *Benchmark) Run(commandName, notes string, baselineDur time.Duration) (m
 				return
 			}
 			// We're done.
-			session := b.ds.SensingSession(ctx)
 			benchFile := benchmarkFileFor(session.ID)
 			benchmarkData, err := os.ReadFile(benchFile)
 			priorBenchmarks := []BenchmarkData{}

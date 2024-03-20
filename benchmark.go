@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"image"
 	"image/color"
@@ -18,6 +19,7 @@ import (
 	"gioui.org/x/explorer"
 	"git.sr.ht/~gioverse/skel/stream"
 	"git.sr.ht/~whereswaldon/watt-wiser/backend"
+	"golang.org/x/exp/maps"
 )
 
 type benchmarkStatus uint8
@@ -146,6 +148,8 @@ func (r resultStyle) Layout(gtx C) D {
 					return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+								layout.Rigid(material.Body1(r.th, "Benchmark ID: "+r.results.bd.BenchmarkID).Layout),
+								layout.Rigid(material.Body1(r.th, "Session ID: "+r.results.bd.SessionID).Layout),
 								layout.Rigid(material.Body1(r.th, "Notes: "+r.results.bd.Notes).Layout),
 								layout.Rigid(material.Body1(r.th, "Executable: "+r.results.bd.Command).Layout),
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -306,7 +310,9 @@ type Benchmark struct {
 	resultList    widget.List
 	resultStates  []*resultState
 
-	resultChart *ChartData
+	resultChart        *ChartData
+	chartingSet        map[backend.BenchmarkData]struct{}
+	chartingDataStream *stream.Stream[backend.Dataset]
 
 	benchmarkStream *stream.Stream[backend.BenchmarkData]
 	bd              backend.BenchmarkData
@@ -320,6 +326,7 @@ func NewBenchmark(ws backend.WindowState, expl *explorer.Explorer) *Benchmark {
 		explorer:    expl,
 		resultList:  widget.List{List: layout.List{Axis: layout.Vertical}},
 		resultChart: NewChart(),
+		chartingSet: make(map[backend.BenchmarkData]struct{}),
 	}
 }
 
@@ -367,6 +374,10 @@ func (b *Benchmark) Update(gtx C, th *material.Theme) {
 	}
 	b.computeResults()
 
+	if chartData, isNew := b.chartingDataStream.ReadNew(gtx); isNew {
+		b.resultChart.SetDataset(chartData)
+	}
+	b.resultChart.Update(gtx)
 }
 
 func (b *Benchmark) runCommand(cmd, notes string) {
@@ -503,7 +514,7 @@ func (b *Benchmark) Layout(gtx C, th *material.Theme) D {
 				}),
 			)
 		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return material.List(th, &b.resultList).Layout(gtx, len(b.results), func(gtx layout.Context, index int) layout.Dimensions {
 				res := b.results[index]
 
@@ -515,12 +526,21 @@ func (b *Benchmark) Layout(gtx C, th *material.Theme) D {
 				if state.Update(gtx) {
 					if state.ChartBox.Value {
 						// Add to chart.
+						b.chartingSet[res.bd] = struct{}{}
 					} else {
 						// Remove from chart.
+						delete(b.chartingSet, res.bd)
 					}
+					set := maps.Keys(b.chartingSet)
+					b.chartingDataStream = stream.New(b.ws.Controller, func(ctx context.Context) <-chan backend.Dataset {
+						return b.ws.Bundle.Benchmark.StreamDatasetForBenchmarks(ctx, set...)
+					})
 				}
 				return result(th, b.resultStates[index], res, b.ds).Layout(gtx)
 			})
+		}),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return b.resultChart.Layout(gtx, th)
 		}),
 	)
 }

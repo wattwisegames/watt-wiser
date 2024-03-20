@@ -8,7 +8,7 @@ import (
 )
 
 type BenchmarkSeries struct {
-	wrapped      *Series
+	wrapped      DataSeries
 	bd           BenchmarkData
 	baselineRate float64
 	baselineSum  float64
@@ -17,10 +17,11 @@ type BenchmarkSeries struct {
 
 var _ DataSeries = (*BenchmarkSeries)(nil)
 
-func NewBenchmarkSeriesFrom(series *Series, bd BenchmarkData) *BenchmarkSeries {
+func NewBenchmarkSeriesFrom(series DataSeries, bd BenchmarkData) *BenchmarkSeries {
 	b := &BenchmarkSeries{
-		wrapped: series,
-		bd:      bd,
+		namePrefix: bd.BenchmarkID + " ",
+		wrapped:    series,
+		bd:         bd,
 	}
 	_, preMean, _, _, _ := series.RatesBetween(bd.PreBaselineStart, bd.PreBaselineEnd)
 	_, postMean, _, _, _ := series.RatesBetween(bd.PostBaselineStart, bd.PostBaselineEnd)
