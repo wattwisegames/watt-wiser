@@ -26,7 +26,7 @@ import (
 
 type Session struct {
 	ID   string
-	Data *RWBox[Dataset]
+	Data Dataset
 	Mode Mode
 	Err  error
 }
@@ -144,10 +144,9 @@ func (d *Datasource) recordSession(sessionID string, mode Mode, files ...io.Read
 		out := make(chan Session, 1)
 		go func() {
 			defer close(out)
-			var data RWBox[Dataset]
 			session := Session{
 				ID:   sessionID,
-				Data: &data,
+				Data: Dataset{},
 				Mode: mode,
 				Err:  nil,
 			}
@@ -185,6 +184,7 @@ func (d *Datasource) recordSession(sessionID string, mode Mode, files ...io.Read
 			}
 			headings := []string{"start (ns)", "end (ns)"}
 			seriesIDToHeading := map[int]int{}
+			seriesIDToSeries := map[int]int{}
 			for {
 				select {
 				case <-ctx.Done():
@@ -192,14 +192,13 @@ func (d *Datasource) recordSession(sessionID string, mode Mode, files ...io.Read
 					return
 				case sample := <-rawSamples:
 					if sample.Kind == KindHeadings {
-						data.Write(func(d *Dataset) {
-							d.SetHeadings(sample.Headings, sample.HeadingSeries)
-						})
 						for sampleHeadingIdx, heading := range sample.Headings {
-							series := sample.HeadingSeries[sampleHeadingIdx]
+							seriesID := sample.HeadingSeries[sampleHeadingIdx]
 							localHeadingIdx := len(headings)
 							headings = append(headings, heading)
-							seriesIDToHeading[series] = localHeadingIdx
+							seriesIDToHeading[seriesID] = localHeadingIdx
+							seriesIDToSeries[seriesID] = localHeadingIdx - 2
+							session.Data = append(session.Data, NewSeries(heading))
 						}
 						if err := csvWriter.Write(headings); err != nil {
 							session.Err = err
@@ -207,9 +206,8 @@ func (d *Datasource) recordSession(sessionID string, mode Mode, files ...io.Read
 							return
 						}
 					} else {
-						data.Write(func(d *Dataset) {
-							d.Insert(sample.Sample)
-						})
+						// We know the series are writable.
+						session.Data[seriesIDToSeries[sample.Series]].(WritableDataSeries).Insert(sample.Sample)
 						start := strconv.FormatInt(sample.StartTimestampNS, 10)
 						end := strconv.FormatInt(sample.EndTimestampNS, 10)
 						position := seriesIDToHeading[sample.Series]

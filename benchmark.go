@@ -65,6 +65,16 @@ type resultState struct {
 	SummaryGrid, DetailGrid component.GridState
 	component.DiscloserState
 	summaryClick widget.Clickable
+	ChartBox     widget.Bool
+}
+
+// Update updates internal widget state and returns whether the charting state of the results
+// changed.
+func (r *resultState) Update(gtx C) bool {
+	if r.summaryClick.Clicked(gtx) {
+		r.DiscloserState.Click()
+	}
+	return r.ChartBox.Update(gtx)
 }
 
 type resultStyle struct {
@@ -74,10 +84,11 @@ type resultStyle struct {
 	discloser    component.SimpleDiscloserStyle
 	results      ResultSet
 	th           *material.Theme
-	ds           *backend.Dataset
+	ds           backend.Dataset
+	chartBtn     material.CheckBoxStyle
 }
 
-func result(th *material.Theme, state *resultState, result ResultSet, ds *backend.Dataset) resultStyle {
+func result(th *material.Theme, state *resultState, result ResultSet, ds backend.Dataset) resultStyle {
 	rs := resultStyle{
 		state:        state,
 		detailTable:  component.Table(th, &state.DetailGrid),
@@ -86,6 +97,7 @@ func result(th *material.Theme, state *resultState, result ResultSet, ds *backen
 		th:           th,
 		ds:           ds,
 		discloser:    component.SimpleDiscloser(th, &state.DiscloserState),
+		chartBtn:     material.CheckBox(th, &state.ChartBox, "Chart"),
 	}
 	rs.summaryTable.HScrollbarStyle.Indicator.MinorWidth = 0
 	rs.summaryTable.HScrollbarStyle.Track.MinorPadding = 0
@@ -119,9 +131,7 @@ func headingFunc(gtx C, th *material.Theme, endAlign bool, heading string) D {
 }
 
 func (r resultStyle) Layout(gtx C) D {
-	if r.state.summaryClick.Clicked(gtx) {
-		r.discloser.Click()
-	}
+	r.state.Update(gtx)
 	longest := material.Body1(r.th, "Post Baseline")
 	origConstraints := gtx.Constraints
 	gtx.Constraints.Min = image.Point{}
@@ -130,52 +140,58 @@ func (r resultStyle) Layout(gtx C) D {
 	})
 	gtx.Constraints = origConstraints
 	return r.discloser.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return material.Clickable(gtx, &r.state.summaryClick, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-						layout.Rigid(material.Body1(r.th, "Notes: "+r.results.bd.Notes).Layout),
-						layout.Rigid(material.Body1(r.th, "Executable: "+r.results.bd.Command).Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							if r.results.bd.Err == nil {
-								return D{}
-							}
-							return material.Body1(r.th, r.results.bd.Err.Error()).Layout(gtx)
+		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+				return material.Clickable(gtx, &r.state.summaryClick, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+								layout.Rigid(material.Body1(r.th, "Notes: "+r.results.bd.Notes).Layout),
+								layout.Rigid(material.Body1(r.th, "Executable: "+r.results.bd.Command).Layout),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									if r.results.bd.Err == nil {
+										return D{}
+									}
+									return material.Body1(r.th, r.results.bd.Err.Error()).Layout(gtx)
+								}),
+							)
+						}),
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							cols := len(r.results.series) + 1
+							return r.summaryTable.Layout(gtx, 2, cols, func(axis layout.Axis, index, constraint int) int {
+								if axis == layout.Vertical {
+									return min(longestDims.Size.Y, constraint)
+								}
+								return constraint / cols
+							},
+								func(gtx C, col int) D {
+									if col == 0 {
+										return headingFunc(gtx, r.th, true, "")
+									}
+									col--
+									return headingFunc(gtx, r.th, true, r.results.series[col])
+								},
+								func(gtx C, row, col int) D {
+									if col == 0 {
+										return headingFunc(gtx, r.th, true, []string{"Watts", "Joules"}[row])
+									}
+									col--
+									data := r.results.summaryWatts
+									if row == 1 {
+										data = r.results.summaryJoules
+									}
+									l := material.Body2(r.th, fmt.Sprintf("%0.2f", data[col]))
+									l.Alignment = text.End
+									return l.Layout(gtx)
+								},
+							)
 						}),
 					)
-				}),
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					cols := len(r.results.series) + 1
-					return r.summaryTable.Layout(gtx, 2, cols, func(axis layout.Axis, index, constraint int) int {
-						if axis == layout.Vertical {
-							return min(longestDims.Size.Y, constraint)
-						}
-						return constraint / cols
-					},
-						func(gtx C, col int) D {
-							if col == 0 {
-								return headingFunc(gtx, r.th, true, "")
-							}
-							col--
-							return headingFunc(gtx, r.th, true, r.results.series[col])
-						},
-						func(gtx C, row, col int) D {
-							if col == 0 {
-								return headingFunc(gtx, r.th, true, []string{"Watts", "Joules"}[row])
-							}
-							col--
-							data := r.results.summaryWatts
-							if row == 1 {
-								data = r.results.summaryJoules
-							}
-							l := material.Body2(r.th, fmt.Sprintf("%0.2f", data[col]))
-							l.Alignment = text.End
-							return l.Layout(gtx)
-						},
-					)
-				}),
-			)
-		})
+				})
+			}),
+			layout.Rigid(r.chartBtn.Layout),
+		)
+
 	},
 		func(gtx layout.Context) layout.Dimensions {
 			prefixCols := 2
@@ -222,7 +238,7 @@ func (r resultStyle) Layout(gtx C) D {
 					)
 				},
 				func(gtx layout.Context, row, col int) layout.Dimensions {
-					phase := row / len(r.ds.Series)
+					phase := row / len(r.ds)
 					return layout.Background{}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						c := color.NRGBA{R: 100, G: 100, B: 100, A: 0}
 						switch phase {
@@ -260,7 +276,7 @@ func (r resultStyle) Layout(gtx C) D {
 								l.MaxLines = 1
 								return l.Layout(gtx)
 							} else if col == 1 {
-								l := material.Body1(r.th, r.ds.Series[row%len(r.ds.Series)].Name())
+								l := material.Body1(r.th, r.ds[row%len(r.ds)].Name())
 								l.MaxLines = 1
 								return l.Layout(gtx)
 							}
@@ -284,12 +300,13 @@ type Benchmark struct {
 	disableStart  bool
 	startBtn      widget.Clickable
 	ws            backend.WindowState
-	dsBox         *backend.RWBox[backend.Dataset]
-	ds            *backend.Dataset
+	ds            backend.Dataset
 	needResults   bool
 	results       []ResultSet
 	resultList    widget.List
 	resultStates  []*resultState
+
+	resultChart *ChartData
 
 	benchmarkStream *stream.Stream[backend.BenchmarkData]
 	bd              backend.BenchmarkData
@@ -299,14 +316,15 @@ type Benchmark struct {
 
 func NewBenchmark(ws backend.WindowState, expl *explorer.Explorer) *Benchmark {
 	return &Benchmark{
-		ws:         ws,
-		explorer:   expl,
-		resultList: widget.List{List: layout.List{Axis: layout.Vertical}},
+		ws:          ws,
+		explorer:    expl,
+		resultList:  widget.List{List: layout.List{Axis: layout.Vertical}},
+		resultChart: NewChart(),
 	}
 }
 
-func (b *Benchmark) SetDataset(ds *backend.RWBox[backend.Dataset]) {
-	b.dsBox = ds
+func (b *Benchmark) SetDataset(ds backend.Dataset) {
+	b.ds = ds
 }
 
 func (b *Benchmark) Update(gtx C, th *material.Theme) {
@@ -364,8 +382,8 @@ func (b *Benchmark) computeResults() {
 	if !b.needResults {
 		return
 	}
-	series := make([]string, len(b.ds.Series))
-	for i, s := range b.ds.Series {
+	series := make([]string, len(b.ds))
+	for i, s := range b.ds {
 		series[i] = s.Name()
 	}
 
@@ -395,7 +413,7 @@ func (b *Benchmark) computeResults() {
 			isBaseline = true
 		}
 		sectionOffset := section * sectionStride
-		for i, s := range b.ds.Series {
+		for i, s := range b.ds {
 			max, mean, min, sum, ok := s.RatesBetween(start, end)
 			if !ok {
 				// Need to retry once new data is available.
@@ -437,72 +455,72 @@ func (b *Benchmark) computeResults() {
 }
 
 func (b *Benchmark) Layout(gtx C, th *material.Theme) D {
-	var dims D
-	b.dsBox.Read(func(d *backend.Dataset) {
-		b.ds = d
-		defer func() {
-			b.ds = nil
-		}()
-		inset := layout.UniformInset(2)
-		b.Update(gtx, th)
-		dims = layout.Flex{
-			Axis: layout.Vertical,
-		}.Layout(gtx,
-			layout.Rigid(func(gtx C) D {
-				return layout.Flex{
-					Alignment: layout.Baseline,
-				}.Layout(gtx,
-					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-						return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							return b.commandEditor.Layout(gtx, th, "Executable to benchmark")
-						})
-					}),
-					layout.Rigid(func(gtx C) D {
-						return inset.Layout(gtx, material.Button(th, &b.chooseFileBtn, "Browse").Layout)
-					}),
-				)
-			}),
-			layout.Rigid(func(gtx C) D {
-				return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return b.notesEditor.Layout(gtx, th, "Benchmark Notes")
-				})
-			}),
-			layout.Rigid(func(gtx C) D {
-				return layout.Flex{
-					Alignment: layout.Baseline,
-				}.Layout(gtx,
-					layout.Flexed(1, func(gtx C) D {
-						return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							btn := material.Button(th, &b.startBtn, "Start")
-							if b.disableStart || b.commandEditor.Len() == 0 {
-								gtx = gtx.Disabled()
-							}
-							return btn.Layout(gtx)
-						})
-					}),
-					layout.Flexed(1, func(gtx C) D {
-						return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							l := material.Body1(th, "Status: "+b.status.String())
-							if b.bd.Err != nil {
-								l.Text += " " + b.bd.Err.Error()
-							}
-							return l.Layout(gtx)
-						})
-					}),
-				)
-			}),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return material.List(th, &b.resultList).Layout(gtx, len(b.results), func(gtx layout.Context, index int) layout.Dimensions {
-					res := b.results[index]
+	inset := layout.UniformInset(2)
+	b.Update(gtx, th)
+	return layout.Flex{
+		Axis: layout.Vertical,
+	}.Layout(gtx,
+		layout.Rigid(func(gtx C) D {
+			return layout.Flex{
+				Alignment: layout.Baseline,
+			}.Layout(gtx,
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return b.commandEditor.Layout(gtx, th, "Executable to benchmark")
+					})
+				}),
+				layout.Rigid(func(gtx C) D {
+					return inset.Layout(gtx, material.Button(th, &b.chooseFileBtn, "Browse").Layout)
+				}),
+			)
+		}),
+		layout.Rigid(func(gtx C) D {
+			return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return b.notesEditor.Layout(gtx, th, "Benchmark Notes")
+			})
+		}),
+		layout.Rigid(func(gtx C) D {
+			return layout.Flex{
+				Alignment: layout.Baseline,
+			}.Layout(gtx,
+				layout.Flexed(1, func(gtx C) D {
+					return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						btn := material.Button(th, &b.startBtn, "Start")
+						if b.disableStart || b.commandEditor.Len() == 0 {
+							gtx = gtx.Disabled()
+						}
+						return btn.Layout(gtx)
+					})
+				}),
+				layout.Flexed(1, func(gtx C) D {
+					return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						l := material.Body1(th, "Status: "+b.status.String())
+						if b.bd.Err != nil {
+							l.Text += " " + b.bd.Err.Error()
+						}
+						return l.Layout(gtx)
+					})
+				}),
+			)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return material.List(th, &b.resultList).Layout(gtx, len(b.results), func(gtx layout.Context, index int) layout.Dimensions {
+				res := b.results[index]
 
-					gtx.Constraints.Min.Y = 0
-					for len(b.resultStates) <= index {
-						b.resultStates = append(b.resultStates, &resultState{})
+				gtx.Constraints.Min.Y = 0
+				for len(b.resultStates) <= index {
+					b.resultStates = append(b.resultStates, &resultState{})
+				}
+				state := b.resultStates[index]
+				if state.Update(gtx) {
+					if state.ChartBox.Value {
+						// Add to chart.
+					} else {
+						// Remove from chart.
 					}
-					return result(th, b.resultStates[index], res, b.ds).Layout(gtx)
-				})
-			}),
-		)
-	})
-	return dims
+				}
+				return result(th, b.resultStates[index], res, b.ds).Layout(gtx)
+			})
+		}),
+	)
 }

@@ -2,12 +2,74 @@ package backend
 
 import (
 	"sort"
+	"sync"
 
 	"git.sr.ht/~whereswaldon/watt-wiser/sensors"
 )
 
+type BenchmarkSeries struct {
+	wrapped      *Series
+	bd           BenchmarkData
+	baselineRate float64
+	baselineSum  float64
+	namePrefix   string
+}
+
+var _ DataSeries = (*BenchmarkSeries)(nil)
+
+func NewBenchmarkSeriesFrom(series *Series, bd BenchmarkData) *BenchmarkSeries {
+	b := &BenchmarkSeries{
+		wrapped: series,
+		bd:      bd,
+	}
+	_, preMean, _, _, _ := series.RatesBetween(bd.PreBaselineStart, bd.PreBaselineEnd)
+	_, postMean, _, _, _ := series.RatesBetween(bd.PostBaselineStart, bd.PostBaselineEnd)
+	_, _, _, sum, _ := series.RatesBetween(bd.PreBaselineStart, bd.PostBaselineEnd)
+	b.baselineRate = (preMean + postMean) / 2
+	b.baselineSum = sum - (float64(b.bd.PostBaselineEnd-b.bd.PreBaselineStart)*b.baselineRate)/1_000_000_000
+	return b
+}
+
+func (b *BenchmarkSeries) Initialized() bool {
+	return b.wrapped.Initialized()
+}
+
+func (b *BenchmarkSeries) Domain() (min, max int64) {
+	return 0, b.bd.PostBaselineEnd
+}
+
+func (b *BenchmarkSeries) RateRange() (min, max float64) {
+	min, max = b.wrapped.RateRange()
+	min -= b.baselineRate
+	max -= b.baselineRate
+	return min, max
+}
+
+func (b *BenchmarkSeries) Name() string {
+	return b.namePrefix + b.wrapped.Name()
+}
+
+func (b *BenchmarkSeries) Sum() float64 {
+	return b.baselineSum
+}
+
+func (b *BenchmarkSeries) RatesBetween(timestampA, timestampB int64) (maximum, mean, minimum, sum float64, ok bool) {
+	// Normalize the times so that time zero is the baseline start.
+	timestampA -= b.bd.PreBaselineStart
+	timestampB -= b.bd.PreBaselineStart
+	// Query real values.
+	maximum, mean, minimum, sum, ok = b.wrapped.RatesBetween(timestampA, timestampB)
+	// Factor out baseline usage.
+	maximum -= b.baselineRate
+	minimum -= b.baselineRate
+	mean -= b.baselineRate
+	sum -= (b.baselineRate * float64(timestampB-timestampA)) / 1_000_000_000
+	return maximum, mean, minimum, sum, ok
+}
+
 // Series represents one data set in a visualization.
 type Series struct {
+	lock                       sync.RWMutex
 	startTimestamps            []int64
 	endTimestamps              []int64
 	values                     []float64
@@ -23,22 +85,32 @@ func NewSeries(name string) *Series {
 }
 
 func (s *Series) Name() string {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
 	return s.name
 }
 
 func (s *Series) Initialized() bool {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
 	return s.initialized
 }
 
 func (s *Series) Domain() (min int64, max int64) {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
 	return s.domainMin, s.domainMax
 }
 
 func (s *Series) RateRange() (min float64, max float64) {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
 	return s.rangeRateMin, s.rangeRateMax
 }
 
 func (s *Series) Sum() float64 {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
 	return s.sum
 }
 
@@ -46,6 +118,8 @@ func (s *Series) Sum() float64 {
 // that the series already contains a value at that time, nothing is added
 // and the method returns false. Otherwise, the method returns true.
 func (s *Series) Insert(sample Sample) (inserted bool) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	if !s.initialized {
 		s.domainMin = sample.StartTimestampNS
 		s.domainMax = sample.StartTimestampNS
@@ -91,6 +165,8 @@ func (s *Series) Insert(sample Sample) (inserted bool) {
 // beyond the domain of the data, all data return values will be zero and the
 // ok return value will be false.
 func (s *Series) RatesBetween(timestampA, timestampB int64) (maximum, mean, minimum, sum float64, ok bool) {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
 	if len(s.startTimestamps) < 1 {
 		return 0, 0, 0, 0, false
 	}
