@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"gioui.org/font"
 	"gioui.org/layout"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
@@ -88,6 +89,8 @@ type resultStyle struct {
 	th           *material.Theme
 	ds           backend.Dataset
 	chartBtn     material.CheckBoxStyle
+	inset        layout.Inset
+	border       widget.Border
 }
 
 func result(th *material.Theme, state *resultState, result ResultSet, ds backend.Dataset) resultStyle {
@@ -100,6 +103,12 @@ func result(th *material.Theme, state *resultState, result ResultSet, ds backend
 		ds:           ds,
 		discloser:    component.SimpleDiscloser(th, &state.DiscloserState),
 		chartBtn:     material.CheckBox(th, &state.ChartBox, "Chart"),
+		inset:        layout.UniformInset(2),
+		border: widget.Border{
+			Color:        th.Fg,
+			Width:        1,
+			CornerRadius: 5,
+		},
 	}
 	rs.summaryTable.HScrollbarStyle.Indicator.MinorWidth = 0
 	rs.summaryTable.HScrollbarStyle.Track.MinorPadding = 0
@@ -141,160 +150,170 @@ func (r resultStyle) Layout(gtx C) D {
 		return layout.UniformInset(2).Layout(gtx, longest.Layout)
 	})
 	gtx.Constraints = origConstraints
-	return r.discloser.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
-			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-				return material.Clickable(gtx, &r.state.summaryClick, func(gtx layout.Context) layout.Dimensions {
+	return r.inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return r.border.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return r.inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return r.discloser.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
 						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-								layout.Rigid(material.Body1(r.th, "Benchmark ID: "+r.results.bd.BenchmarkID).Layout),
-								layout.Rigid(material.Body1(r.th, "Session ID: "+r.results.bd.SessionID).Layout),
-								layout.Rigid(material.Body1(r.th, "Notes: "+r.results.bd.Notes).Layout),
-								layout.Rigid(material.Body1(r.th, "Executable: "+r.results.bd.Command).Layout),
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									if r.results.bd.Err == nil {
-										return D{}
-									}
-									return material.Body1(r.th, r.results.bd.Err.Error()).Layout(gtx)
-								}),
-							)
+							return material.Clickable(gtx, &r.state.summaryClick, func(gtx layout.Context) layout.Dimensions {
+								return layout.Flex{Alignment: layout.Middle}.Layout(gtx,
+									layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+										return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+											layout.Rigid(func(gtx C) D {
+												l := material.Body1(r.th, "Benchmark ID: "+r.results.bd.BenchmarkID)
+												l.Font.Weight = font.Bold
+												return l.Layout(gtx)
+											}),
+											layout.Rigid(material.Body1(r.th, "Session ID: "+r.results.bd.SessionID).Layout),
+											layout.Rigid(material.Body1(r.th, "Notes: "+r.results.bd.Notes).Layout),
+											layout.Rigid(material.Body1(r.th, "Executable: "+r.results.bd.Command).Layout),
+											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+												if r.results.bd.Err == nil {
+													return D{}
+												}
+												return material.Body1(r.th, r.results.bd.Err.Error()).Layout(gtx)
+											}),
+										)
+									}),
+									layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+										cols := len(r.results.series) + 1
+										return r.summaryTable.Layout(gtx, 2, cols, func(axis layout.Axis, index, constraint int) int {
+											if axis == layout.Vertical {
+												return min(longestDims.Size.Y, constraint)
+											}
+											return constraint / cols
+										},
+											func(gtx C, col int) D {
+												if col == 0 {
+													return headingFunc(gtx, r.th, true, "")
+												}
+												col--
+												return headingFunc(gtx, r.th, true, r.results.series[col])
+											},
+											func(gtx C, row, col int) D {
+												if col == 0 {
+													return headingFunc(gtx, r.th, true, []string{"Watts", "Joules"}[row])
+												}
+												col--
+												data := r.results.summaryWatts
+												if row == 1 {
+													data = r.results.summaryJoules
+												}
+												l := material.Body2(r.th, fmt.Sprintf("%0.2f", data[col]))
+												l.Alignment = text.End
+												return l.Layout(gtx)
+											},
+										)
+									}),
+								)
+							})
 						}),
-						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-							cols := len(r.results.series) + 1
-							return r.summaryTable.Layout(gtx, 2, cols, func(axis layout.Axis, index, constraint int) int {
-								if axis == layout.Vertical {
-									return min(longestDims.Size.Y, constraint)
-								}
-								return constraint / cols
-							},
-								func(gtx C, col int) D {
-									if col == 0 {
-										return headingFunc(gtx, r.th, true, "")
-									}
-									col--
-									return headingFunc(gtx, r.th, true, r.results.series[col])
-								},
-								func(gtx C, row, col int) D {
-									if col == 0 {
-										return headingFunc(gtx, r.th, true, []string{"Watts", "Joules"}[row])
-									}
-									col--
-									data := r.results.summaryWatts
-									if row == 1 {
-										data = r.results.summaryJoules
-									}
-									l := material.Body2(r.th, fmt.Sprintf("%0.2f", data[col]))
-									l.Alignment = text.End
-									return l.Layout(gtx)
-								},
-							)
-						}),
+						layout.Rigid(r.chartBtn.Layout),
 					)
-				})
-			}),
-			layout.Rigid(r.chartBtn.Layout),
-		)
 
-	},
-		func(gtx layout.Context) layout.Dimensions {
-			prefixCols := 2
-			flexedColumns := 1
-			rigidColumns := (r.results.statsCols + prefixCols) - flexedColumns
-			return r.detailTable.Layout(gtx, r.results.statsRows, r.results.statsCols+prefixCols, func(axis layout.Axis, index, constraint int) int {
-				if axis == layout.Vertical {
-					return min(longestDims.Size.Y, constraint)
-				}
-				if index == 1 {
-					return (constraint - (longestDims.Size.X * rigidColumns)) / flexedColumns
-				}
-				return longestDims.Size.X
-			},
-				func(gtx layout.Context, index int) layout.Dimensions {
-					return layout.Background{}.Layout(gtx,
-						func(gtx layout.Context) layout.Dimensions {
-							paint.FillShape(gtx.Ops, r.th.ContrastBg, clip.Rect{Max: gtx.Constraints.Min}.Op())
-							return D{Size: gtx.Constraints.Min}
-						},
-						func(gtx layout.Context) layout.Dimensions {
-							l := material.Body1(r.th, "")
-							l.MaxLines = 1
-							l.Color = r.th.ContrastFg
-							if index == 0 {
-								l.Text = "Phase"
-							} else if index == 1 {
-								l.Text = "Sensor Name"
-							} else {
-								switch index - prefixCols {
-								case 0:
-									l.Text = "sum(J)"
-								case 1:
-									l.Text = "min(W)"
-								case 2:
-									l.Text = "max(W)"
-								case 3:
-									l.Text = "avg(W)"
-								}
-								l.Alignment = text.End
-							}
-							return l.Layout(gtx)
-						},
-					)
 				},
-				func(gtx layout.Context, row, col int) layout.Dimensions {
-					phase := row / len(r.ds)
-					return layout.Background{}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						c := color.NRGBA{R: 100, G: 100, B: 100, A: 0}
-						switch phase {
-						case 1:
-							c.A = 100
-							c.G += 50
-							c.R -= 50
-							c.B -= 50
-						case 3:
-							c.A = 100
-							c.G += 50
-							c.R -= 50
-							c.B -= 50
-						}
-						if row&1 == 0 {
-							c.A += 50
-						}
-						paint.FillShape(gtx.Ops, c, clip.Rect{Max: gtx.Constraints.Min}.Op())
-						return D{Size: gtx.Constraints.Min}
-					},
-						func(gtx layout.Context) layout.Dimensions {
-							if col == 0 {
-								var label string
-								switch phase {
-								case 0:
-									label = "Pre Baseline"
-								case 1:
-									label = "Benchmark"
-								case 2:
-									label = "Post Baseline"
-								case 3:
-									label = "Adjusted"
-								}
-								l := material.Body1(r.th, label)
-								l.MaxLines = 1
-								return l.Layout(gtx)
-							} else if col == 1 {
-								l := material.Body1(r.th, r.ds[row%len(r.ds)].Name())
-								l.MaxLines = 1
-								return l.Layout(gtx)
+					func(gtx layout.Context) layout.Dimensions {
+						prefixCols := 2
+						flexedColumns := 1
+						rigidColumns := (r.results.statsCols + prefixCols) - flexedColumns
+						return r.detailTable.Layout(gtx, r.results.statsRows, r.results.statsCols+prefixCols, func(axis layout.Axis, index, constraint int) int {
+							if axis == layout.Vertical {
+								return min(longestDims.Size.Y, constraint)
 							}
-							col -= prefixCols
-							val := r.results.stats[row*r.results.statsCols+col]
-							l := material.Body1(r.th, fmt.Sprintf("%0.2f", val))
-							l.Alignment = text.End
-							l.MaxLines = 1
-							return l.Layout(gtx)
+							if index == 1 {
+								return (constraint - (longestDims.Size.X * rigidColumns)) / flexedColumns
+							}
+							return longestDims.Size.X
 						},
-					)
-				},
-			)
+							func(gtx layout.Context, index int) layout.Dimensions {
+								return layout.Background{}.Layout(gtx,
+									func(gtx layout.Context) layout.Dimensions {
+										paint.FillShape(gtx.Ops, r.th.ContrastBg, clip.Rect{Max: gtx.Constraints.Min}.Op())
+										return D{Size: gtx.Constraints.Min}
+									},
+									func(gtx layout.Context) layout.Dimensions {
+										l := material.Body1(r.th, "")
+										l.MaxLines = 1
+										l.Color = r.th.ContrastFg
+										if index == 0 {
+											l.Text = "Phase"
+										} else if index == 1 {
+											l.Text = "Sensor Name"
+										} else {
+											switch index - prefixCols {
+											case 0:
+												l.Text = "sum(J)"
+											case 1:
+												l.Text = "min(W)"
+											case 2:
+												l.Text = "max(W)"
+											case 3:
+												l.Text = "avg(W)"
+											}
+											l.Alignment = text.End
+										}
+										return l.Layout(gtx)
+									},
+								)
+							},
+							func(gtx layout.Context, row, col int) layout.Dimensions {
+								phase := row / len(r.ds)
+								return layout.Background{}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									c := color.NRGBA{R: 100, G: 100, B: 100, A: 0}
+									switch phase {
+									case 1:
+										c.A = 100
+										c.G += 50
+										c.R -= 50
+										c.B -= 50
+									case 3:
+										c.A = 100
+										c.G += 50
+										c.R -= 50
+										c.B -= 50
+									}
+									if row&1 == 0 {
+										c.A += 50
+									}
+									paint.FillShape(gtx.Ops, c, clip.Rect{Max: gtx.Constraints.Min}.Op())
+									return D{Size: gtx.Constraints.Min}
+								},
+									func(gtx layout.Context) layout.Dimensions {
+										if col == 0 {
+											var label string
+											switch phase {
+											case 0:
+												label = "Pre Baseline"
+											case 1:
+												label = "Benchmark"
+											case 2:
+												label = "Post Baseline"
+											case 3:
+												label = "Adjusted"
+											}
+											l := material.Body1(r.th, label)
+											l.MaxLines = 1
+											return l.Layout(gtx)
+										} else if col == 1 {
+											l := material.Body1(r.th, r.ds[row%len(r.ds)].Name())
+											l.MaxLines = 1
+											return l.Layout(gtx)
+										}
+										col -= prefixCols
+										val := r.results.stats[row*r.results.statsCols+col]
+										l := material.Body1(r.th, fmt.Sprintf("%0.2f", val))
+										l.Alignment = text.End
+										l.MaxLines = 1
+										return l.Layout(gtx)
+									},
+								)
+							},
+						)
+					})
+			})
 		})
+	})
 }
 
 type Benchmark struct {
