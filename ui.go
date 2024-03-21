@@ -161,6 +161,9 @@ func (ui *UI) layoutMainArea(gtx C) D {
 		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			if ui.tab.Value == tabMonitor {
+				if ui.session.ID == "" {
+					return ui.layoutStartScreen(gtx)
+				}
 				return ui.chart.Layout(gtx, ui.th)
 			} else {
 				return ui.benchmark.Layout(gtx, ui.th, ui.session.Data)
@@ -201,8 +204,5 @@ func (ui *UI) layoutStartScreen(gtx C) D {
 // Layout the UI into the provided context.
 func (ui *UI) Layout(gtx C) D {
 	ui.Update(gtx)
-	if ui.session.ID != "" {
-		return ui.layoutMainArea(gtx)
-	}
-	return ui.layoutStartScreen(gtx)
+	return ui.layoutMainArea(gtx)
 }
