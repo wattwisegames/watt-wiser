@@ -36,7 +36,7 @@ func (b *BenchmarkSeries) Initialized() bool {
 }
 
 func (b *BenchmarkSeries) Domain() (min, max int64) {
-	return 0, b.bd.PostBaselineEnd
+	return 0, b.bd.PostBaselineEnd - b.bd.PreBaselineStart
 }
 
 func (b *BenchmarkSeries) RateRange() (min, max float64) {
@@ -55,9 +55,12 @@ func (b *BenchmarkSeries) Sum() float64 {
 }
 
 func (b *BenchmarkSeries) RatesBetween(timestampA, timestampB int64) (maximum, mean, minimum, sum float64, ok bool) {
+	if timestampA <= 0 && timestampB <= 0 {
+		return 0, 0, 0, 0, false
+	}
 	// Normalize the times so that time zero is the baseline start.
-	timestampA -= b.bd.PreBaselineStart
-	timestampB -= b.bd.PreBaselineStart
+	timestampA += b.bd.PreBaselineStart
+	timestampB += b.bd.PreBaselineStart
 	// Query real values.
 	maximum, mean, minimum, sum, ok = b.wrapped.RatesBetween(timestampA, timestampB)
 	// Factor out baseline usage.
