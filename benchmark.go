@@ -313,6 +313,7 @@ type Benchmark struct {
 	resultChart        *ChartData
 	chartingSet        map[backend.BenchmarkData]struct{}
 	chartingDataStream *stream.Stream[backend.Dataset]
+	resizer            component.Resize
 
 	benchmarkStream *stream.Stream[backend.BenchmarkData]
 	bd              backend.BenchmarkData
@@ -321,13 +322,16 @@ type Benchmark struct {
 }
 
 func NewBenchmark(ws backend.WindowState, expl *explorer.Explorer) *Benchmark {
-	return &Benchmark{
+	b := &Benchmark{
 		ws:          ws,
 		explorer:    expl,
 		resultList:  widget.List{List: layout.List{Axis: layout.Vertical}},
 		resultChart: NewChart(),
 		chartingSet: make(map[backend.BenchmarkData]struct{}),
 	}
+	b.resizer.Ratio = .5
+	b.resizer.Axis = layout.Vertical
+	return b
 }
 
 func (b *Benchmark) SetDataset(ds backend.Dataset) {
@@ -515,32 +519,46 @@ func (b *Benchmark) Layout(gtx C, th *material.Theme) D {
 			)
 		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return material.List(th, &b.resultList).Layout(gtx, len(b.results), func(gtx layout.Context, index int) layout.Dimensions {
-				res := b.results[index]
+			return b.resizer.Layout(gtx,
+				func(gtx layout.Context) layout.Dimensions {
+					return material.List(th, &b.resultList).Layout(gtx, len(b.results), func(gtx layout.Context, index int) layout.Dimensions {
+						res := b.results[index]
 
-				gtx.Constraints.Min.Y = 0
-				for len(b.resultStates) <= index {
-					b.resultStates = append(b.resultStates, &resultState{})
-				}
-				state := b.resultStates[index]
-				if state.Update(gtx) {
-					if state.ChartBox.Value {
-						// Add to chart.
-						b.chartingSet[res.bd] = struct{}{}
-					} else {
-						// Remove from chart.
-						delete(b.chartingSet, res.bd)
-					}
-					set := maps.Keys(b.chartingSet)
-					b.chartingDataStream = stream.New(b.ws.Controller, func(ctx context.Context) <-chan backend.Dataset {
-						return b.ws.Bundle.Benchmark.StreamDatasetForBenchmarks(ctx, set...)
+						gtx.Constraints.Min.Y = 0
+						for len(b.resultStates) <= index {
+							b.resultStates = append(b.resultStates, &resultState{})
+						}
+						state := b.resultStates[index]
+						if state.Update(gtx) {
+							if state.ChartBox.Value {
+								// Add to chart.
+								b.chartingSet[res.bd] = struct{}{}
+							} else {
+								// Remove from chart.
+								delete(b.chartingSet, res.bd)
+							}
+							set := maps.Keys(b.chartingSet)
+							b.chartingDataStream = stream.New(b.ws.Controller, func(ctx context.Context) <-chan backend.Dataset {
+								return b.ws.Bundle.Benchmark.StreamDatasetForBenchmarks(ctx, set...)
+							})
+						}
+						return result(th, b.resultStates[index], res, b.ds).Layout(gtx)
 					})
-				}
-				return result(th, b.resultStates[index], res, b.ds).Layout(gtx)
-			})
-		}),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return b.resultChart.Layout(gtx, th)
+				},
+				func(gtx layout.Context) layout.Dimensions {
+					return b.resultChart.Layout(gtx, th)
+				},
+				func(gtx layout.Context) layout.Dimensions {
+					sz := image.Point{
+						Y: gtx.Dp(2),
+						X: gtx.Constraints.Max.X,
+					}
+					paint.FillShape(gtx.Ops, color.NRGBA{A: 255}, clip.Rect{
+						Max: sz,
+					}.Op())
+					return D{Size: sz}
+				},
+			)
 		}),
 	)
 }
