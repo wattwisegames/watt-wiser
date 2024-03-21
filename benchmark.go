@@ -81,29 +81,29 @@ func (r *resultState) Update(gtx C) bool {
 }
 
 type resultStyle struct {
-	state        *resultState
-	detailTable  component.TableStyle
-	summaryTable component.TableStyle
-	discloser    component.SimpleDiscloserStyle
-	results      ResultSet
-	th           *material.Theme
-	ds           backend.Dataset
-	chartBtn     material.CheckBoxStyle
-	inset        layout.Inset
-	border       widget.Border
+	state          *resultState
+	detailTable    component.TableStyle
+	summaryTable   component.TableStyle
+	discloser      component.SimpleDiscloserStyle
+	results        ResultSet
+	th             *material.Theme
+	seriesHeadings []string
+	chartBtn       material.CheckBoxStyle
+	inset          layout.Inset
+	border         widget.Border
 }
 
-func result(th *material.Theme, state *resultState, result ResultSet, ds backend.Dataset) resultStyle {
+func result(th *material.Theme, state *resultState, result ResultSet, seriesHeadings []string) resultStyle {
 	rs := resultStyle{
-		state:        state,
-		detailTable:  component.Table(th, &state.DetailGrid),
-		summaryTable: component.Table(th, &state.SummaryGrid),
-		results:      result,
-		th:           th,
-		ds:           ds,
-		discloser:    component.SimpleDiscloser(th, &state.DiscloserState),
-		chartBtn:     material.CheckBox(th, &state.ChartBox, "Chart"),
-		inset:        layout.UniformInset(2),
+		state:          state,
+		detailTable:    component.Table(th, &state.DetailGrid),
+		summaryTable:   component.Table(th, &state.SummaryGrid),
+		results:        result,
+		th:             th,
+		seriesHeadings: seriesHeadings,
+		discloser:      component.SimpleDiscloser(th, &state.DiscloserState),
+		chartBtn:       material.CheckBox(th, &state.ChartBox, "Chart"),
+		inset:          layout.UniformInset(2),
 		border: widget.Border{
 			Color:        th.Fg,
 			Width:        1,
@@ -258,7 +258,7 @@ func (r resultStyle) Layout(gtx C) D {
 								)
 							},
 							func(gtx layout.Context, row, col int) layout.Dimensions {
-								phase := row / len(r.ds)
+								phase := row / len(r.seriesHeadings)
 								return layout.Background{}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 									c := color.NRGBA{R: 100, G: 100, B: 100, A: 0}
 									switch phase {
@@ -296,7 +296,7 @@ func (r resultStyle) Layout(gtx C) D {
 											l.MaxLines = 1
 											return l.Layout(gtx)
 										} else if col == 1 {
-											l := material.Body1(r.th, r.ds[row%len(r.ds)].Name())
+											l := material.Body1(r.th, r.seriesHeadings[row%len(r.seriesHeadings)])
 											l.MaxLines = 1
 											return l.Layout(gtx)
 										}
@@ -317,23 +317,30 @@ func (r resultStyle) Layout(gtx C) D {
 }
 
 type Benchmark struct {
+	ws backend.WindowState
+
+	// State for recording benchmark form.
 	commandEditor component.TextField
 	notesEditor   component.TextField
 	chooseFileBtn widget.Clickable
 	disableStart  bool
 	startBtn      widget.Clickable
-	ws            backend.WindowState
-	ds            backend.Dataset
-	needResults   bool
-	results       []ResultSet
-	resultList    widget.List
-	resultStates  []*resultState
 
+	needResults bool
+
+	resizer component.Resize
+
+	// State for managing the list of benchmark results.
+	results      []ResultSet
+	resultList   widget.List
+	resultStates []*resultState
+
+	// State for visualizing charted results.
 	resultChart        *ChartData
 	chartingSet        map[backend.BenchmarkData]struct{}
 	chartingDataStream *stream.Stream[backend.Dataset]
-	resizer            component.Resize
 
+	// State for initiating and monitoring benchmark progress.
 	benchmarkStream *stream.Stream[backend.BenchmarkData]
 	bd              backend.BenchmarkData
 	status          benchmarkStatus
@@ -353,11 +360,7 @@ func NewBenchmark(ws backend.WindowState, expl *explorer.Explorer) *Benchmark {
 	return b
 }
 
-func (b *Benchmark) SetDataset(ds backend.Dataset) {
-	b.ds = ds
-}
-
-func (b *Benchmark) Update(gtx C, th *material.Theme) {
+func (b *Benchmark) Update(gtx C, th *material.Theme, activeDataset backend.Dataset) {
 	b.commandEditor.Update(gtx, th, "Executable to Benchmark")
 	b.notesEditor.Update(gtx, th, "Benchmark Notes")
 	if b.startBtn.Clicked(gtx) {
@@ -395,7 +398,7 @@ func (b *Benchmark) Update(gtx C, th *material.Theme) {
 			b.status = statusError
 		}
 	}
-	b.computeResults()
+	b.computeResults(activeDataset)
 
 	if chartData, isNew := b.chartingDataStream.ReadNew(gtx); isNew {
 		b.resultChart.SetDataset(chartData)
@@ -412,12 +415,12 @@ func (b *Benchmark) runCommand(cmd, notes string) {
 	b.benchmarkStream = stream.New(b.ws.Controller, mut.Stream)
 }
 
-func (b *Benchmark) computeResults() {
+func (b *Benchmark) computeResults(ds backend.Dataset) {
 	if !b.needResults {
 		return
 	}
-	series := make([]string, len(b.ds))
-	for i, s := range b.ds {
+	series := make([]string, len(ds))
+	for i, s := range ds {
 		series[i] = s.Name()
 	}
 
@@ -447,7 +450,7 @@ func (b *Benchmark) computeResults() {
 			isBaseline = true
 		}
 		sectionOffset := section * sectionStride
-		for i, s := range b.ds {
+		for i, s := range ds {
 			max, mean, min, sum, ok := s.RatesBetween(start, end)
 			if !ok {
 				// Need to retry once new data is available.
@@ -488,9 +491,9 @@ func (b *Benchmark) computeResults() {
 	b.needResults = false
 }
 
-func (b *Benchmark) Layout(gtx C, th *material.Theme) D {
+func (b *Benchmark) Layout(gtx C, th *material.Theme, activeDataset backend.Dataset) D {
 	inset := layout.UniformInset(2)
-	b.Update(gtx, th)
+	b.Update(gtx, th, activeDataset)
 	return layout.Flex{
 		Axis: layout.Vertical,
 	}.Layout(gtx,
@@ -561,7 +564,7 @@ func (b *Benchmark) Layout(gtx C, th *material.Theme) D {
 								return b.ws.Bundle.Benchmark.StreamDatasetForBenchmarks(ctx, set...)
 							})
 						}
-						return result(th, b.resultStates[index], res, b.ds).Layout(gtx)
+						return result(th, b.resultStates[index], res, activeDataset.Headings()).Layout(gtx)
 					})
 				},
 				func(gtx layout.Context) layout.Dimensions {

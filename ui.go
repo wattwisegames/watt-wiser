@@ -77,7 +77,6 @@ func (ui *UI) Update(gtx C) {
 	if session, isNew := ui.sessionStream.ReadNew(gtx); isNew {
 		ui.session = session
 		ui.chart.SetDataset(session.Data)
-		ui.benchmark.SetDataset(session.Data)
 	}
 	ui.tab.Update(gtx)
 	if ui.session.Err != nil {
@@ -158,7 +157,7 @@ func (ui *UI) layoutMainArea(gtx C) D {
 			if ui.tab.Value == tabMonitor {
 				return ui.chart.Layout(gtx, ui.th)
 			} else {
-				return ui.benchmark.Layout(gtx, ui.th)
+				return ui.benchmark.Layout(gtx, ui.th, ui.session.Data)
 			}
 		}),
 	)
