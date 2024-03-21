@@ -316,7 +316,8 @@ type Benchmark struct {
 	startBtn      widget.Clickable
 
 	// State for loading benchmarks form.
-	loadBtn widget.Clickable
+	loadBtn    widget.Clickable
+	loadStream *stream.Stream[[]backend.BenchmarkData]
 
 	resizer component.Resize
 
@@ -354,6 +355,7 @@ func (b *Benchmark) Update(gtx C, th *material.Theme, activeDataset backend.Data
 	b.commandEditor.Update(gtx, th, "Executable to Benchmark")
 	b.notesEditor.Update(gtx, th, "Benchmark Notes")
 	if b.loadBtn.Clicked(gtx) {
+		b.loadStream = stream.New(b.ws.Controller, b.ws.Benchmark.LoadBenchmarks(b.explorer).Stream)
 	}
 	if b.startBtn.Clicked(gtx) {
 		b.disableStart = true
@@ -389,6 +391,10 @@ func (b *Benchmark) Update(gtx C, th *material.Theme, activeDataset backend.Data
 			b.status = statusError
 			b.benchmarkErr = data.Err
 		}
+	}
+	newBenchmarks, isNew := b.loadStream.ReadNew(gtx)
+	if isNew {
+		b.results = append(b.results, newBenchmarks...)
 	}
 
 	if chartData, isNew := b.chartingDataStream.ReadNew(gtx); isNew {
@@ -437,7 +443,7 @@ func (b *Benchmark) Layout(gtx C, th *material.Theme, activeDataset backend.Data
 			}.Layout(gtx,
 				layout.Flexed(1, func(gtx C) D {
 					return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						btn := material.Button(th, &b.startBtn, "Start")
+						btn := material.Button(th, &b.startBtn, "Start New Benchmark")
 						if b.disableStart || b.commandEditor.Len() == 0 {
 							gtx = gtx.Disabled()
 						}
@@ -451,6 +457,12 @@ func (b *Benchmark) Layout(gtx C, th *material.Theme, activeDataset backend.Data
 							l.Text += " " + b.benchmarkErr.Error()
 						}
 						return l.Layout(gtx)
+					})
+				}),
+				layout.Flexed(1, func(gtx C) D {
+					return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						btn := material.Button(th, &b.loadBtn, "Load From File")
+						return btn.Layout(gtx)
 					})
 				}),
 			)

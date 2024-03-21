@@ -183,21 +183,25 @@ func (d *Datasource) recordSession(sessionID string, mode Mode, files ...io.Read
 			var sessionWriter *bufio.Writer
 			var csvWriter *csv.Writer
 			var err error
-			sessionFile, err = os.Create(sessionFileFor(sessionID))
-			if err != nil {
-				session.Err = err
-				out <- session
-				return
-			}
-			sessionWriter = bufio.NewWriter(sessionFile)
-			csvWriter = csv.NewWriter(sessionWriter)
-			flushAll := func() {
-				csvWriter.Flush()
-				err := sessionWriter.Flush()
-				err = errors.Join(err, sessionFile.Close())
+			if mode == ModeSensing {
+				sessionFile, err = os.Create(sessionFileFor(sessionID))
 				if err != nil {
 					session.Err = err
 					out <- session
+					return
+				}
+				sessionWriter = bufio.NewWriter(sessionFile)
+				csvWriter = csv.NewWriter(sessionWriter)
+			}
+			flushAll := func() {
+				if mode == ModeSensing {
+					csvWriter.Flush()
+					err := sessionWriter.Flush()
+					err = errors.Join(err, sessionFile.Close())
+					if err != nil {
+						session.Err = err
+						out <- session
+					}
 				}
 			}
 			headings := []string{"start (ns)", "end (ns)"}
@@ -218,26 +222,30 @@ func (d *Datasource) recordSession(sessionID string, mode Mode, files ...io.Read
 							seriesIDToSeries[seriesID] = localHeadingIdx - 2
 							session.Data = append(session.Data, NewSeries(heading))
 						}
-						if err := csvWriter.Write(headings); err != nil {
-							session.Err = err
-							out <- session
-							return
+						if mode == ModeSensing {
+							if err := csvWriter.Write(headings); err != nil {
+								session.Err = err
+								out <- session
+								return
+							}
 						}
 					} else {
 						// We know the series are writable.
 						session.Data[seriesIDToSeries[sample.Series]].(WritableDataSeries).Insert(sample.Sample)
-						start := strconv.FormatInt(sample.StartTimestampNS, 10)
-						end := strconv.FormatInt(sample.EndTimestampNS, 10)
-						position := seriesIDToHeading[sample.Series]
-						val := strconv.FormatFloat(sample.Value, 'f', -1, 64)
-						record := make([]string, len(headings))
-						record[0] = start
-						record[1] = end
-						record[position] = val
-						if err := csvWriter.Write(record); err != nil {
-							session.Err = err
-							out <- session
-							return
+						if mode == ModeSensing {
+							start := strconv.FormatInt(sample.StartTimestampNS, 10)
+							end := strconv.FormatInt(sample.EndTimestampNS, 10)
+							position := seriesIDToHeading[sample.Series]
+							val := strconv.FormatFloat(sample.Value, 'f', -1, 64)
+							record := make([]string, len(headings))
+							record[0] = start
+							record[1] = end
+							record[position] = val
+							if err := csvWriter.Write(record); err != nil {
+								session.Err = err
+								out <- session
+								return
+							}
 						}
 					}
 					out <- session
@@ -259,8 +267,12 @@ func (d *Datasource) LoadFromFile(expl *explorer.Explorer) (string, error) {
 
 func (d *Datasource) LoadFromStream(mode Mode, files ...io.ReadCloser) string {
 	id := generateSessionID()
-	d.recordSession(id, mode, files...)
-	return id
+	return d.LoadFromStreamWithID(id, mode, files...)
+}
+
+func (d *Datasource) LoadFromStreamWithID(sessionID string, mode Mode, files ...io.ReadCloser) string {
+	d.recordSession(sessionID, mode, files...)
+	return sessionID
 }
 
 func (d *Datasource) LaunchSensors() (string, error) {
