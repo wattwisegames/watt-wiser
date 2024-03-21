@@ -195,10 +195,10 @@ func (c *ChartData) Update(gtx C) {
 }
 
 func (c *ChartData) Layout(gtx C, th *material.Theme) D {
-	c.Update(gtx)
-	if len(c.Dataset) < 1 {
+	if !c.Dataset.Initialized() {
 		return D{Size: gtx.Constraints.Max}
 	}
+	c.Update(gtx)
 	minRangeLabel := material.Body1(th, strconv.FormatFloat(0, 'f', 3, 64))
 	origConstraints := gtx.Constraints
 	gtx.Constraints.Min = image.Point{}
@@ -614,7 +614,9 @@ func (c *ChartData) computeRange(gtx C) (maxY, pxPerWatt int, rangeMax float64) 
 	if c.Stacked.Value {
 		rangeMax = rangeSum
 	}
-	rangeMax = ceil(rangeMax)
+	// Ensure rangeMax must be at least one to prevent dividing by zero and working
+	// with a NaN from that.
+	rangeMax = max(ceil(rangeMax), 1)
 	dPPerWatt := max(floor(maxYDp/unit.Dp(rangeMax)), 1)
 	pxPerWatt = gtx.Dp(dPPerWatt)
 	// Add back any pixels that weren't used by our power-of-ten scaling.
