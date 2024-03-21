@@ -32,3 +32,11 @@ func (d Dataset) Domain() (dMin int64, dMax int64) {
 	}
 	return dMin, dMax
 }
+
+func (d Dataset) Headings() []string {
+	out := make([]string, len(d))
+	for i := range d {
+		out[i] = d[i].Name()
+	}
+	return out
+}
