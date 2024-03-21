@@ -47,9 +47,16 @@ Flags:
 			trace.Start(f)
 		}
 	}
+	stopTrace := func() {
+		if traceInto != "" {
+			trace.Stop()
+			f.Close()
+			fmt.Println("trace written to", f.Name())
+			pprof.StopCPUProfile()
+		}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	mutator := stream.NewMutator(ctx, time.Second)
-
 	bundle, err := backend.NewBundle(ctx, mutator)
 	if err != nil {
 		log.Fatalf("unable to initialize application backend: %v", err)
@@ -79,12 +86,8 @@ Flags:
 			sessionID = bundle.Datasource.LoadFromStream(backend.ModeSensing, files...)
 		}
 		go func() {
-			err := loop(w, bundle, sessionID)
-			if traceInto != "" {
-				trace.Stop()
-				f.Close()
-				pprof.StopCPUProfile()
-			}
+			err := loop(ctx, w, bundle, sessionID)
+			stopTrace()
 			exitStatus := 0
 			if err != nil {
 				exitStatus = 1
@@ -105,10 +108,10 @@ Flags:
 
 // loop runs the top-level application event loop, connecting a UI instance to sources of data
 // and ensuring that the UI is notified of new data.
-func loop(w *app.Window, bundle backend.Bundle, sessionID string) error {
+func loop(ctx context.Context, w *app.Window, bundle backend.Bundle, sessionID string) error {
 	var ops op.Ops
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	ws := backend.NewWindowState(ctx, bundle, w)
 
