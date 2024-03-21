@@ -53,17 +53,6 @@ func (b benchmarkStatus) String() string {
 	}
 }
 
-type ResultSet struct {
-	bd              backend.BenchmarkData
-	stats           []float64
-	series          []string
-	statsRows       int
-	statsCols       int
-	summaryJoules   []float64
-	summaryWatts    []float64
-	summaryDuration time.Duration
-}
-
 type resultState struct {
 	SummaryGrid, DetailGrid component.GridState
 	component.DiscloserState
@@ -85,7 +74,7 @@ type resultStyle struct {
 	detailTable    component.TableStyle
 	summaryTable   component.TableStyle
 	discloser      component.SimpleDiscloserStyle
-	results        ResultSet
+	results        backend.BenchmarkData
 	th             *material.Theme
 	seriesHeadings []string
 	chartBtn       material.CheckBoxStyle
@@ -93,7 +82,7 @@ type resultStyle struct {
 	border         widget.Border
 }
 
-func result(th *material.Theme, state *resultState, result ResultSet, seriesHeadings []string) resultStyle {
+func result(th *material.Theme, state *resultState, result backend.BenchmarkData, seriesHeadings []string) resultStyle {
 	rs := resultStyle{
 		state:          state,
 		detailTable:    component.Table(th, &state.DetailGrid),
@@ -161,23 +150,23 @@ func (r resultStyle) Layout(gtx C) D {
 									layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 										return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 											layout.Rigid(func(gtx C) D {
-												l := material.Body1(r.th, "Benchmark ID: "+r.results.bd.BenchmarkID)
+												l := material.Body1(r.th, "Benchmark ID: "+r.results.BenchmarkID)
 												l.Font.Weight = font.Bold
 												return l.Layout(gtx)
 											}),
-											layout.Rigid(material.Body1(r.th, "Session ID: "+r.results.bd.SessionID).Layout),
-											layout.Rigid(material.Body1(r.th, "Notes: "+r.results.bd.Notes).Layout),
-											layout.Rigid(material.Body1(r.th, "Executable: "+r.results.bd.Command).Layout),
+											layout.Rigid(material.Body1(r.th, "Session ID: "+r.results.SessionID).Layout),
+											layout.Rigid(material.Body1(r.th, "Notes: "+r.results.Notes).Layout),
+											layout.Rigid(material.Body1(r.th, "Executable: "+r.results.Command).Layout),
 											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-												if r.results.bd.Err == nil {
+												if r.results.Err == nil {
 													return D{}
 												}
-												return material.Body1(r.th, r.results.bd.Err.Error()).Layout(gtx)
+												return material.Body1(r.th, r.results.Err.Error()).Layout(gtx)
 											}),
 										)
 									}),
 									layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-										cols := len(r.results.series) + 1
+										cols := len(r.results.Results.Series) + 1
 										return r.summaryTable.Layout(gtx, 2, cols, func(axis layout.Axis, index, constraint int) int {
 											if axis == layout.Vertical {
 												return min(longestDims.Size.Y, constraint)
@@ -189,16 +178,16 @@ func (r resultStyle) Layout(gtx C) D {
 													return headingFunc(gtx, r.th, true, "")
 												}
 												col--
-												return headingFunc(gtx, r.th, true, r.results.series[col])
+												return headingFunc(gtx, r.th, true, r.results.Results.Series[col])
 											},
 											func(gtx C, row, col int) D {
 												if col == 0 {
 													return headingFunc(gtx, r.th, true, []string{"Watts", "Joules"}[row])
 												}
 												col--
-												data := r.results.summaryWatts
+												data := r.results.Results.SummaryWatts
 												if row == 1 {
-													data = r.results.summaryJoules
+													data = r.results.Results.SummaryJoules
 												}
 												l := material.Body2(r.th, fmt.Sprintf("%0.2f", data[col]))
 												l.Alignment = text.End
@@ -216,8 +205,8 @@ func (r resultStyle) Layout(gtx C) D {
 					func(gtx layout.Context) layout.Dimensions {
 						prefixCols := 2
 						flexedColumns := 1
-						rigidColumns := (r.results.statsCols + prefixCols) - flexedColumns
-						return r.detailTable.Layout(gtx, r.results.statsRows, r.results.statsCols+prefixCols, func(axis layout.Axis, index, constraint int) int {
+						rigidColumns := (r.results.Results.StatsCols + prefixCols) - flexedColumns
+						return r.detailTable.Layout(gtx, r.results.Results.StatsRows, r.results.Results.StatsCols+prefixCols, func(axis layout.Axis, index, constraint int) int {
 							if axis == layout.Vertical {
 								return min(longestDims.Size.Y, constraint)
 							}
@@ -301,7 +290,7 @@ func (r resultStyle) Layout(gtx C) D {
 											return l.Layout(gtx)
 										}
 										col -= prefixCols
-										val := r.results.stats[row*r.results.statsCols+col]
+										val := r.results.Results.Stats[row*r.results.Results.StatsCols+col]
 										l := material.Body1(r.th, fmt.Sprintf("%0.2f", val))
 										l.Alignment = text.End
 										l.MaxLines = 1
@@ -326,23 +315,24 @@ type Benchmark struct {
 	disableStart  bool
 	startBtn      widget.Clickable
 
-	needResults bool
+	// State for loading benchmarks form.
+	loadBtn widget.Clickable
 
 	resizer component.Resize
 
 	// State for managing the list of benchmark results.
-	results      []ResultSet
+	results      []backend.BenchmarkData
 	resultList   widget.List
 	resultStates []*resultState
 
 	// State for visualizing charted results.
 	resultChart        *ChartData
-	chartingSet        map[backend.BenchmarkData]struct{}
+	chartingSet        map[string]backend.BenchmarkData
 	chartingDataStream *stream.Stream[backend.Dataset]
 
 	// State for initiating and monitoring benchmark progress.
 	benchmarkStream *stream.Stream[backend.BenchmarkData]
-	bd              backend.BenchmarkData
+	benchmarkErr    error
 	status          benchmarkStatus
 	explorer        *explorer.Explorer
 }
@@ -353,7 +343,7 @@ func NewBenchmark(ws backend.WindowState, expl *explorer.Explorer) *Benchmark {
 		explorer:    expl,
 		resultList:  widget.List{List: layout.List{Axis: layout.Vertical}},
 		resultChart: NewChart(),
-		chartingSet: make(map[backend.BenchmarkData]struct{}),
+		chartingSet: make(map[string]backend.BenchmarkData),
 	}
 	b.resizer.Ratio = .5
 	b.resizer.Axis = layout.Vertical
@@ -363,6 +353,8 @@ func NewBenchmark(ws backend.WindowState, expl *explorer.Explorer) *Benchmark {
 func (b *Benchmark) Update(gtx C, th *material.Theme, activeDataset backend.Dataset) {
 	b.commandEditor.Update(gtx, th, "Executable to Benchmark")
 	b.notesEditor.Update(gtx, th, "Benchmark Notes")
+	if b.loadBtn.Clicked(gtx) {
+	}
 	if b.startBtn.Clicked(gtx) {
 		b.disableStart = true
 		b.runCommand(b.commandEditor.Text(), b.notesEditor.Text())
@@ -381,24 +373,23 @@ func (b *Benchmark) Update(gtx C, th *material.Theme, activeDataset backend.Data
 	}
 	data, isNew := b.benchmarkStream.ReadNew(gtx)
 	if isNew {
-		b.bd = data
 		switch {
-		case b.bd.PostBaselineEnd != 0:
+		case data.PostBaselineEnd != 0:
 			b.status = statusDone
 			b.disableStart = false
-			b.needResults = true
-		case b.bd.PostBaselineStart != 0:
+			b.results = append(b.results, data)
+		case data.PostBaselineStart != 0:
 			b.status = statusRunningPostBaseline
-		case b.bd.PreBaselineEnd != 0:
+		case data.PreBaselineEnd != 0:
 			b.status = statusRunningCommand
-		case b.bd.PreBaselineStart != 0:
+		case data.PreBaselineStart != 0:
 			b.status = statusRunningPreBaseline
 		}
-		if b.bd.Err != nil {
+		if data.Err != nil {
 			b.status = statusError
+			b.benchmarkErr = data.Err
 		}
 	}
-	b.computeResults(activeDataset)
 
 	if chartData, isNew := b.chartingDataStream.ReadNew(gtx); isNew {
 		b.resultChart.SetDataset(chartData)
@@ -413,82 +404,6 @@ func (b *Benchmark) runCommand(cmd, notes string) {
 		return
 	}
 	b.benchmarkStream = stream.New(b.ws.Controller, mut.Stream)
-}
-
-func (b *Benchmark) computeResults(ds backend.Dataset) {
-	if !b.needResults {
-		return
-	}
-	series := make([]string, len(ds))
-	for i, s := range ds {
-		series[i] = s.Name()
-	}
-
-	sectionsCount := 4
-	rows := len(series) * sectionsCount
-	baselines := make([]float64, len(series))
-	cols := 4 // energy, minW, maxW, meanW for each baseline and runtime
-	values := make([]float64, rows*cols)
-	sectionStride := len(series) * cols
-	finalSectionOffset := (sectionsCount - 1) * sectionStride
-	var runDuration float64
-	for section := 0; section < sectionsCount-1; section++ {
-		var start, end int64
-		isBaseline := false
-		switch section {
-		case 0:
-			start = b.bd.PreBaselineStart
-			end = b.bd.PreBaselineEnd
-			isBaseline = true
-		case 1:
-			start = b.bd.PreBaselineEnd
-			end = b.bd.PostBaselineStart
-			runDuration = float64(end-start) / 1_000_000_000
-		case 2:
-			start = b.bd.PostBaselineStart
-			end = b.bd.PostBaselineEnd
-			isBaseline = true
-		}
-		sectionOffset := section * sectionStride
-		for i, s := range ds {
-			max, mean, min, sum, ok := s.RatesBetween(start, end)
-			if !ok {
-				// Need to retry once new data is available.
-				return
-			}
-			values[sectionOffset+i*cols+0] = sum
-			values[sectionOffset+i*cols+1] = min
-			values[sectionOffset+i*cols+2] = max
-			values[sectionOffset+i*cols+3] = mean
-			if isBaseline {
-				baselines[i] += mean * .5
-			} else {
-				values[finalSectionOffset+i*cols+0] = sum
-				values[finalSectionOffset+i*cols+1] = min
-				values[finalSectionOffset+i*cols+2] = max
-				values[finalSectionOffset+i*cols+3] = mean
-			}
-		}
-	}
-	rs := ResultSet{
-		statsRows:       rows,
-		statsCols:       cols,
-		series:          series,
-		stats:           values,
-		bd:              b.bd,
-		summaryDuration: time.Duration(b.bd.PostBaselineStart-b.bd.PreBaselineEnd) * time.Nanosecond,
-	}
-	for i, baseline := range baselines {
-		values[finalSectionOffset+i*cols+0] -= baseline * float64(runDuration)
-		rs.summaryJoules = append(rs.summaryJoules, values[finalSectionOffset+i*cols+0])
-		values[finalSectionOffset+i*cols+1] -= baseline
-		values[finalSectionOffset+i*cols+2] -= baseline
-		values[finalSectionOffset+i*cols+3] -= baseline
-		rs.summaryWatts = append(rs.summaryWatts, values[finalSectionOffset+i*cols+3])
-	}
-
-	b.results = append(b.results, rs)
-	b.needResults = false
 }
 
 func (b *Benchmark) Layout(gtx C, th *material.Theme, activeDataset backend.Dataset) D {
@@ -532,8 +447,8 @@ func (b *Benchmark) Layout(gtx C, th *material.Theme, activeDataset backend.Data
 				layout.Flexed(1, func(gtx C) D {
 					return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						l := material.Body1(th, "Status: "+b.status.String())
-						if b.bd.Err != nil {
-							l.Text += " " + b.bd.Err.Error()
+						if b.benchmarkErr != nil {
+							l.Text += " " + b.benchmarkErr.Error()
 						}
 						return l.Layout(gtx)
 					})
@@ -554,12 +469,12 @@ func (b *Benchmark) Layout(gtx C, th *material.Theme, activeDataset backend.Data
 						if state.Update(gtx) {
 							if state.ChartBox.Value {
 								// Add to chart.
-								b.chartingSet[res.bd] = struct{}{}
+								b.chartingSet[res.BenchmarkID] = res
 							} else {
 								// Remove from chart.
-								delete(b.chartingSet, res.bd)
+								delete(b.chartingSet, res.BenchmarkID)
 							}
-							set := maps.Keys(b.chartingSet)
+							set := maps.Values(b.chartingSet)
 							b.chartingDataStream = stream.New(b.ws.Controller, func(ctx context.Context) <-chan backend.Dataset {
 								return b.ws.Bundle.Benchmark.StreamDatasetForBenchmarks(ctx, set...)
 							})

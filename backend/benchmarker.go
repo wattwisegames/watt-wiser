@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -28,6 +29,16 @@ func NewBenchmark(mutator *stream.Mutator, ds *Datasource) *Benchmark {
 	}
 }
 
+type ResultSet struct {
+	Stats           []float64
+	Series          []string
+	StatsRows       int
+	StatsCols       int
+	SummaryJoules   []float64
+	SummaryWatts    []float64
+	SummaryDuration time.Duration
+}
+
 type BenchmarkData struct {
 	SessionID                                                            string
 	BenchmarkID                                                          string
@@ -35,10 +46,85 @@ type BenchmarkData struct {
 	Notes                                                                string
 	PreBaselineStart, PreBaselineEnd, PostBaselineStart, PostBaselineEnd int64
 	Err                                                                  error
+	Results                                                              ResultSet `json:"-"`
+}
+
+func (b *BenchmarkData) computeResults(sessionStream <-chan Session) {
+sessionUpdateLoop:
+	for session := range sessionStream {
+		series := session.Data.Headings()
+
+		sectionsCount := 4
+		rows := len(series) * sectionsCount
+		baselines := make([]float64, len(series))
+		cols := 4 // energy, minW, maxW, meanW for each baseline and runtime
+		values := make([]float64, rows*cols)
+		sectionStride := len(series) * cols
+		finalSectionOffset := (sectionsCount - 1) * sectionStride
+		var runDuration float64
+		for section := 0; section < sectionsCount-1; section++ {
+			var start, end int64
+			isBaseline := false
+			switch section {
+			case 0:
+				start = b.PreBaselineStart
+				end = b.PreBaselineEnd
+				isBaseline = true
+			case 1:
+				start = b.PreBaselineEnd
+				end = b.PostBaselineStart
+				runDuration = float64(end-start) / 1_000_000_000
+			case 2:
+				start = b.PostBaselineStart
+				end = b.PostBaselineEnd
+				isBaseline = true
+			}
+			sectionOffset := section * sectionStride
+			for i, s := range session.Data {
+				max, mean, min, sum, ok := s.RatesBetween(start, end)
+				if !ok {
+					// Need to retry once new data is available.
+					continue sessionUpdateLoop
+				}
+				values[sectionOffset+i*cols+0] = sum
+				values[sectionOffset+i*cols+1] = min
+				values[sectionOffset+i*cols+2] = max
+				values[sectionOffset+i*cols+3] = mean
+				if isBaseline {
+					baselines[i] += mean * .5
+				} else {
+					values[finalSectionOffset+i*cols+0] = sum
+					values[finalSectionOffset+i*cols+1] = min
+					values[finalSectionOffset+i*cols+2] = max
+					values[finalSectionOffset+i*cols+3] = mean
+				}
+			}
+		}
+		rs := ResultSet{
+			StatsRows:       rows,
+			StatsCols:       cols,
+			Series:          series,
+			Stats:           values,
+			SummaryDuration: time.Duration(b.PostBaselineStart-b.PreBaselineEnd) * time.Nanosecond,
+		}
+		for i, baseline := range baselines {
+			values[finalSectionOffset+i*cols+0] -= baseline * float64(runDuration)
+			rs.SummaryJoules = append(rs.SummaryJoules, values[finalSectionOffset+i*cols+0])
+			values[finalSectionOffset+i*cols+1] -= baseline
+			values[finalSectionOffset+i*cols+2] -= baseline
+			values[finalSectionOffset+i*cols+3] -= baseline
+			rs.SummaryWatts = append(rs.SummaryWatts, values[finalSectionOffset+i*cols+3])
+		}
+		b.Results = rs
+		return
+	}
 }
 
 func (b *Benchmark) StreamDatasetForBenchmarks(ctx context.Context, benchmarks ...BenchmarkData) <-chan Dataset {
 	sessionsToBenchmarks := map[string][]BenchmarkData{}
+	slices.SortStableFunc(benchmarks, func(a, b BenchmarkData) int {
+		return int(a.PreBaselineStart - b.PreBaselineStart)
+	})
 	for _, b := range benchmarks {
 		sessionsToBenchmarks[b.SessionID] = append(sessionsToBenchmarks[b.SessionID], b)
 	}
@@ -129,6 +215,11 @@ func (b *Benchmark) Run(commandName, notes string, baselineDur time.Duration) (m
 			case <-ctx.Done():
 				return
 			}
+			// Calculate results.
+			subCtx, cancel := context.WithCancel(ctx)
+			defer cancel()
+			currentData.computeResults(b.ds.SensingSessionStream(subCtx))
+			cancel()
 			// Emit post end time data.
 			select {
 			case out <- currentData:

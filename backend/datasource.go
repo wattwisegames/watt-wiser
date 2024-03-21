@@ -127,6 +127,24 @@ func (d *Datasource) SensingSession(ctx context.Context) Session {
 	})
 }
 
+func (d *Datasource) SensingSessionStream(ctx context.Context) <-chan Session {
+	return stream.Multiplex(d.pool.Stream(ctx), func(ctx context.Context, state string, mutations map[string]*stream.Mutation[Session]) (<-chan Session, string) {
+		for _, m := range mutations {
+			subCtx, cancel := context.WithCancel(ctx)
+			session := <-m.Stream(subCtx)
+			cancel()
+			if session.Mode == ModeSensing {
+				if session.ID == state {
+					return nil, state
+				}
+				state = session.ID
+				return m.Stream(ctx), state
+			}
+		}
+		return nil, state
+	})
+}
+
 func generateSessionID() string {
 	return strings.Replace(time.Now().UTC().Format("20060102150405.000000000"), ".", "", 1)
 }
