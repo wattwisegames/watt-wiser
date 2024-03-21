@@ -4,6 +4,7 @@ import (
 	"context"
 	"image"
 	"image/color"
+	"log"
 
 	"gioui.org/font/gofont"
 	"gioui.org/layout"
@@ -87,7 +88,12 @@ func (ui *UI) Update(gtx C) {
 		ui.ws.Bundle.Datasource.LaunchSensors()
 	}
 	if ui.explorerBtn.Clicked(gtx) {
-		ui.ws.Bundle.Datasource.LoadFromFile(ui.expl)
+		_, mut, err := ui.ws.Bundle.Datasource.LoadFromFile(ui.expl)
+		if err != nil {
+			log.Printf("failed loading data from file: %v", err)
+		} else {
+			ui.sessionStream = stream.New(ui.ws.Controller, mut.Stream)
+		}
 	}
 }
 

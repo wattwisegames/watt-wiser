@@ -257,22 +257,22 @@ func (d *Datasource) recordSession(sessionID string, mode Mode, files ...io.Read
 	return box
 }
 
-func (d *Datasource) LoadFromFile(expl *explorer.Explorer) (string, error) {
+func (d *Datasource) LoadFromFile(expl *explorer.Explorer) (string, *stream.Mutation[Session], error) {
 	file, err := expl.ChooseFile()
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return d.LoadFromStream(ModeReplaying, file), nil
+	id, m := d.LoadFromStream(ModeReplaying, file)
+	return id, m, nil
 }
 
-func (d *Datasource) LoadFromStream(mode Mode, files ...io.ReadCloser) string {
+func (d *Datasource) LoadFromStream(mode Mode, files ...io.ReadCloser) (string, *stream.Mutation[Session]) {
 	id := generateSessionID()
-	return d.LoadFromStreamWithID(id, mode, files...)
+	return id, d.LoadFromStreamWithID(id, mode, files...)
 }
 
-func (d *Datasource) LoadFromStreamWithID(sessionID string, mode Mode, files ...io.ReadCloser) string {
-	d.recordSession(sessionID, mode, files...)
-	return sessionID
+func (d *Datasource) LoadFromStreamWithID(sessionID string, mode Mode, files ...io.ReadCloser) *stream.Mutation[Session] {
+	return d.recordSession(sessionID, mode, files...)
 }
 
 func (d *Datasource) LaunchSensors() (string, error) {

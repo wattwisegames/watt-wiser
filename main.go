@@ -83,7 +83,7 @@ Flags:
 		}
 		sessionID := ""
 		if len(files) > 0 {
-			sessionID = bundle.Datasource.LoadFromStream(backend.ModeSensing, files...)
+			sessionID, _ = bundle.Datasource.LoadFromStream(backend.ModeSensing, files...)
 		}
 		go func() {
 			err := loop(ctx, w, bundle, sessionID)
