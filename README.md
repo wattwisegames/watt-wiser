@@ -6,7 +6,7 @@ A software energy consumption estimation tool built as part of the [Watt-Wise Ga
 
 ## Status
 
-Usable for simple energy estimation. The GUI is functional on Linux, macOS, and Windows, and the sensors support is captured in the following table.
+Usable for simple energy estimation and benchmarking. The GUI is functional on Linux, macOS, and Windows, and the sensors support is captured in the following table.
 
 | OS | Intel CPU | AMD CPU | Apple CPU | NVIDIA GPU | AMD GPU |
 | --- | --- | --- | --- | --- | --- |
@@ -51,11 +51,44 @@ How to install Watt Wiser on supported platforms. macOS is not listed because we
 
 ## GUI Controls
 
+There are two GUI tabs, one for system energy monitoring, and the other for energy benchmarking.
+
+### Monitor Tab
+
+![Monitor UI Screenshot](./img/monitor.webp)
+
 You can toggle between a line plot and a stacked area plot by clicking in the chart area. The line plot is useful for comparing the absolute values of different data sources, while the stacked area graph helps estimate total consumption.
 
 You can also toggle on/off individual data sets by clicking on the colored square to the left of that data in the legend. When using the stacked area graph, it's important to toggle off data sets that overlap. See the next section for an example.
 
 Scroll vertically to zoom on the time axis and horizontally to pan.
+
+You can pause the visualzation (if showing live data) with the pause button at the origin of the chart.
+
+### Benchmark Tab
+
+![Benchmark UI Screenshot](./img/benchmark.webp)
+
+This tab allows you to record energy benchmarks of running programs and to review prior benchmarks.
+
+To record a new benchmark (this requires you to have the sensors running):
+
+- [Recommended] Close all programs that you can on your computer other than watt-wiser to ensure a clean measurement.
+- [Recommended] Lock your CPU and GPU clock speeds. (more docs on this soon)
+- Select an executable with the "Browse" button. This should be your application or a wrapper script that runs your application with additional arguments/environment modification. **IMPORTANT**: The benchmark will last from when this program starts to when it exits. If your executable doesn't stop running, the benchmark will never complete.
+- [Optional] Type any notes about what specifically you're measuring in the notes section.
+- Click "Start" and wait. There will be a two second pause as watt-wiser gathers system baseline energy data, then your program will launch. After your program exits, there will be another two-second pause to gather a second system energy baseline.
+- A summary of the benchmark will appear below the form. You can click on it to expand it into a data table with more detailed information, and you can click the "chart" checkbox to display a chart of the energy use during that baseline.
+
+To compare benchmarks you can toggle the "chart" checkbox next to multiple runs, and they will be shown together in the chart.
+
+You can load benchmarks from past invocations of watt-wiser with the "Load from File" button. These can also be displayed in the chart.
+
+> Known issue: benchmarks loaded from files do not display their summary data, but do correctly show in the chart. This will be fixed soon.
+
+#### How to read benchmark chart
+
+This chart will show different numbers than the monitor tab because the system's baseline energy consumption is *automatically* subtracted out from the data shown. The graph is intended to reflect **only** the energy consumption of your mesaured application.
 
 ## Included Example Trace
 
