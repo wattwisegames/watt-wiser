@@ -77,7 +77,7 @@ To record a new benchmark (this requires you to have the sensors running):
 - [Recommended] Lock your CPU and GPU clock speeds. (more docs on this soon)
 - Select an executable with the "Browse" button. This should be your application or a wrapper script that runs your application with additional arguments/environment modification. **IMPORTANT**: The benchmark will last from when this program starts to when it exits. If your executable doesn't stop running, the benchmark will never complete.
 - [Optional] Type any notes about what specifically you're measuring in the notes section.
-- Click "Start" and wait. There will be a two second pause as watt-wiser gathers system baseline energy data, then your program will launch. After your program exits, there will be another two-second pause to gather a second system energy baseline.
+- Click "Start New Benchmark" and wait. There will be a two second pause as watt-wiser gathers system baseline energy data, then your program will launch. After your program exits, there will be another two-second pause to gather a second system energy baseline.
 - A summary of the benchmark will appear below the form. You can click on it to expand it into a data table with more detailed information, and you can click the "chart" checkbox to display a chart of the energy use during that baseline.
 
 To compare benchmarks you can toggle the "chart" checkbox next to multiple runs, and they will be shown together in the chart.
@@ -88,7 +88,7 @@ You can load benchmarks from past invocations of watt-wiser with the "Load from 
 
 #### How to read benchmark chart
 
-This chart will show different numbers than the monitor tab because the system's baseline energy consumption is *automatically* subtracted out from the data shown. The graph is intended to reflect **only** the energy consumption of your mesaured application.
+This chart will show different numbers than the monitor tab because the system's baseline energy consumption is *automatically* subtracted out from the data shown. The graph is intended to reflect **only** the energy consumption of your measured application.
 
 ## Included Example Trace
 
