@@ -87,7 +87,7 @@ func (ui *UI) Update(gtx C) {
 		ui.launching = true
 		id, err := ui.ws.Bundle.Datasource.LaunchSensors()
 		if err != nil {
-			log.Printf("failed launching sensors: %w", err)
+			log.Printf("failed launching sensors: %v", err)
 		} else {
 			ui.sessionStream = stream.New(ui.ws.Controller, func(ctx context.Context) <-chan backend.Session {
 				return ui.ws.Bundle.Datasource.StreamSession(ctx, id)
