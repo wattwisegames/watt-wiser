@@ -85,7 +85,14 @@ func (ui *UI) Update(gtx C) {
 	}
 	if !ui.launching && ui.launchBtn.Clicked(gtx) {
 		ui.launching = true
-		ui.ws.Bundle.Datasource.LaunchSensors()
+		id, err := ui.ws.Bundle.Datasource.LaunchSensors()
+		if err != nil {
+			log.Printf("failed launching sensors: %w", err)
+		} else {
+			ui.sessionStream = stream.New(ui.ws.Controller, func(ctx context.Context) <-chan backend.Session {
+				return ui.ws.Bundle.Datasource.StreamSession(ctx, id)
+			})
+		}
 	}
 	if ui.explorerBtn.Clicked(gtx) {
 		_, mut, err := ui.ws.Bundle.Datasource.LoadFromFile(ui.expl)
