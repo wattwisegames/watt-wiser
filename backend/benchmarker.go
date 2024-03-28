@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -279,15 +280,28 @@ func (b *Benchmark) Run(commandName, notes string, baselineDur time.Duration) (m
 				log.Printf("failed marshalling new benchmark data: %v", err)
 				return
 			}
-			if err := os.WriteFile(benchFile, newJSON, 0o644); err != nil {
-				log.Printf("failed writing new benchmark data: %v", err)
+			exeDir, _ := os.Executable()
+			f, err := os.Create(filepath.Join(filepath.Dir(exeDir),benchFile))
+			if err != nil {
+				log.Printf("failed opening new benchmark data: %v", err)
 				return
 			}
-			if !isNewFile {
-				if err := os.Remove(newName); err != nil {
-					log.Printf("failed removing old benchmark file %q: %v", newName, err)
+			defer func() {
+				err := f.Close()
+				if err != nil {
+					log.Printf("failed closing new benchmark data: %v", err)
 					return
 				}
+				if !isNewFile {
+					if err := os.Remove(newName); err != nil {
+						log.Printf("failed removing old benchmark file %q: %v", newName, err)
+						return
+					}
+				}
+			}()
+			if _, err := f.Write(newJSON); err != nil {
+				log.Printf("failed writing new benchmark data: %v", err)
+				return
 			}
 		}()
 		return out

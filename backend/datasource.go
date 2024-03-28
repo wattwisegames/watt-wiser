@@ -184,7 +184,8 @@ func (d *Datasource) recordSession(sessionID string, mode Mode, files ...io.Read
 			var csvWriter *csv.Writer
 			var err error
 			if mode == ModeSensing {
-				sessionFile, err = os.Create(sessionFileFor(sessionID))
+				exeDir, _ := os.Executable()
+				sessionFile, err = os.Create(filepath.Join(filepath.Dir(exeDir),sessionFileFor(sessionID)))
 				if err != nil {
 					session.Err = err
 					out <- session
