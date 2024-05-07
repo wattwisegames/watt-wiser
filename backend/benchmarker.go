@@ -67,6 +67,7 @@ func (b *BenchmarkData) attemptComputeResults(session Session) bool {
 	values := make([]float64, rows*cols)
 	sectionStride := len(series) * cols
 	finalSectionOffset := (sectionsCount - 1) * sectionStride
+	totalBaselineDuration := float64(b.PreBaselineEnd - b.PreBaselineStart + b.PostBaselineEnd - b.PostBaselineStart)
 	var runDuration float64
 	for section := 0; section < sectionsCount-1; section++ {
 		var start, end int64
@@ -97,7 +98,8 @@ func (b *BenchmarkData) attemptComputeResults(session Session) bool {
 			values[sectionOffset+i*cols+2] = max
 			values[sectionOffset+i*cols+3] = mean
 			if isBaseline {
-				baselines[i] += mean * .5
+				baselineWeight := float64(end-start) / totalBaselineDuration
+				baselines[i] += mean * baselineWeight
 			} else {
 				values[finalSectionOffset+i*cols+0] = sum
 				values[finalSectionOffset+i*cols+1] = min
