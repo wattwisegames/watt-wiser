@@ -171,6 +171,9 @@ func (s *Series) Insert(sample Sample) (inserted bool) {
 func (s *Series) RatesBetween(timestampA, timestampB int64) (maximum, mean, minimum, sum float64, ok bool) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
+	if timestampA == timestampB {
+		return 0, 0, 0, 0, true
+	}
 	if len(s.startTimestamps) < 1 {
 		return 0, 0, 0, 0, false
 	}

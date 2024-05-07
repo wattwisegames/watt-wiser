@@ -28,7 +28,10 @@ type Session struct {
 	ID   string
 	Data Dataset
 	Mode Mode
-	Err  error
+	// Loaded is meaningless if Mode is Sensing, but if Replaying, Loaded indicates
+	// that all sample data is available for the session.
+	Loaded bool
+	Err    error
 }
 
 type RWBox[T any] struct {
@@ -176,7 +179,7 @@ func (d *Datasource) recordSession(sessionID string, mode Mode, files ...io.Read
 				if f, ok := file.(interface{ Name() string }); ok {
 					d.watcher.Add(f.Name())
 				}
-				go d.readSource(file, rawSamples)
+				go d.readSource(file, mode, rawSamples)
 			}
 
 			var sessionFile *os.File
@@ -185,7 +188,7 @@ func (d *Datasource) recordSession(sessionID string, mode Mode, files ...io.Read
 			var err error
 			if mode == ModeSensing {
 				exeDir, _ := os.Executable()
-				sessionFile, err = os.Create(filepath.Join(filepath.Dir(exeDir),sessionFileFor(sessionID)))
+				sessionFile, err = os.Create(filepath.Join(filepath.Dir(exeDir), sessionFileFor(sessionID)))
 				if err != nil {
 					session.Err = err
 					out <- session
@@ -213,8 +216,12 @@ func (d *Datasource) recordSession(sessionID string, mode Mode, files ...io.Read
 				case <-ctx.Done():
 					flushAll()
 					return
-				case sample := <-rawSamples:
-					if sample.Kind == KindHeadings {
+				case sample, more := <-rawSamples:
+					if !more {
+						rawSamples = nil
+						session.Loaded = true
+						log.Printf("Finished reading session %s", sessionID)
+					} else if sample.Kind == KindHeadings {
 						for sampleHeadingIdx, heading := range sample.Headings {
 							seriesID := sample.HeadingSeries[sampleHeadingIdx]
 							localHeadingIdx := len(headings)
@@ -324,7 +331,8 @@ func launchSensors(ctx context.Context) (io.ReadCloser, error) {
 	return output, nil
 }
 
-func (d *Datasource) readSource(source io.Reader, samplesChan chan InputData) {
+func (d *Datasource) readSource(source io.Reader, mode Mode, samplesChan chan InputData) {
+	defer close(samplesChan)
 	bufRead := NewLineReader(source)
 	csvReader := csv.NewReader(bufRead)
 	csvReader.TrimLeadingSpace = true
@@ -367,10 +375,14 @@ readLoop:
 		rec, err := csvReader.Read()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				for ev := range d.watcher.Events {
-					if ev.Op == fsnotify.Write {
-						continue readLoop
+				if mode == ModeSensing {
+					for ev := range d.watcher.Events {
+						if ev.Op == fsnotify.Write {
+							continue readLoop
+						}
 					}
+				} else {
+					return
 				}
 			}
 			log.Printf("could not read sensor data: %v", err)

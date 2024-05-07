@@ -55,6 +55,9 @@ type BenchmarkData struct {
 }
 
 func (b *BenchmarkData) attemptComputeResults(session Session) bool {
+	if session.Mode == ModeReplaying && !session.Loaded {
+		return false
+	}
 	series := session.Data.Headings()
 
 	sectionsCount := 4
@@ -281,7 +284,7 @@ func (b *Benchmark) Run(commandName, notes string, baselineDur time.Duration) (m
 				return
 			}
 			exeDir, _ := os.Executable()
-			f, err := os.Create(filepath.Join(filepath.Dir(exeDir),benchFile))
+			f, err := os.Create(filepath.Join(filepath.Dir(exeDir), benchFile))
 			if err != nil {
 				log.Printf("failed opening new benchmark data: %v", err)
 				return
@@ -325,6 +328,10 @@ func (b *Benchmark) LoadBenchmarks(expl *explorer.Explorer) *stream.Mutation[[]B
 				log.Printf("failed decoding json: %v", err)
 				return
 			}
+			basepath := ""
+			if f, ok := file.(*os.File); ok {
+				basepath = filepath.Dir(f.Name())
+			}
 
 			sessions := map[string][]BenchmarkData{}
 			for _, bd := range output {
@@ -333,7 +340,7 @@ func (b *Benchmark) LoadBenchmarks(expl *explorer.Explorer) *stream.Mutation[[]B
 			finalOutputs := []BenchmarkData{}
 			for sessionID, relevantBenchmarks := range sessions {
 				filename := sessionFileFor(sessionID)
-				sessionFile, err := os.Open(filename)
+				sessionFile, err := os.Open(filepath.Join(basepath, filename))
 				if err != nil {
 					log.Printf("failed opening session file %q: %v", filename, err)
 					continue
