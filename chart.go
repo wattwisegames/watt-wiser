@@ -778,6 +778,9 @@ func (c *ChartData) layoutLinePlot(gtx C, maxY, pxPerWatt int, rangeMax float64)
 }
 
 func (c *ChartData) layoutStackPlot(gtx C, maxY, pxPerWatt int, rangeMax float64) {
+	if len(c.seriesSlices) < 1 {
+		return
+	}
 	rangeMin := float64(0)
 	rangeInterval := float32(rangeMax - rangeMin)
 	if rangeInterval == 0 {
