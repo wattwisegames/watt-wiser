@@ -70,29 +70,27 @@ func (r *resultState) Update(gtx C) bool {
 }
 
 type resultStyle struct {
-	state          *resultState
-	detailTable    component.TableStyle
-	summaryTable   component.TableStyle
-	discloser      component.SimpleDiscloserStyle
-	results        backend.BenchmarkData
-	th             *material.Theme
-	seriesHeadings []string
-	chartBtn       material.CheckBoxStyle
-	inset          layout.Inset
-	border         widget.Border
+	state        *resultState
+	detailTable  component.TableStyle
+	summaryTable component.TableStyle
+	discloser    component.SimpleDiscloserStyle
+	results      backend.BenchmarkData
+	th           *material.Theme
+	chartBtn     material.CheckBoxStyle
+	inset        layout.Inset
+	border       widget.Border
 }
 
-func result(th *material.Theme, state *resultState, result backend.BenchmarkData, seriesHeadings []string) resultStyle {
+func result(th *material.Theme, state *resultState, result backend.BenchmarkData) resultStyle {
 	rs := resultStyle{
-		state:          state,
-		detailTable:    component.Table(th, &state.DetailGrid),
-		summaryTable:   component.Table(th, &state.SummaryGrid),
-		results:        result,
-		th:             th,
-		seriesHeadings: seriesHeadings,
-		discloser:      component.SimpleDiscloser(th, &state.DiscloserState),
-		chartBtn:       material.CheckBox(th, &state.ChartBox, "Chart"),
-		inset:          layout.UniformInset(2),
+		state:        state,
+		detailTable:  component.Table(th, &state.DetailGrid),
+		summaryTable: component.Table(th, &state.SummaryGrid),
+		results:      result,
+		th:           th,
+		discloser:    component.SimpleDiscloser(th, &state.DiscloserState),
+		chartBtn:     material.CheckBox(th, &state.ChartBox, "Chart"),
+		inset:        layout.UniformInset(2),
 		border: widget.Border{
 			Color:        th.Fg,
 			Width:        1,
@@ -247,7 +245,7 @@ func (r resultStyle) Layout(gtx C) D {
 								)
 							},
 							func(gtx layout.Context, row, col int) layout.Dimensions {
-								phase := row / len(r.seriesHeadings)
+								phase := row / len(r.results.Results.Series)
 								return layout.Background{}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 									c := color.NRGBA{R: 100, G: 100, B: 100, A: 0}
 									switch phase {
@@ -285,7 +283,8 @@ func (r resultStyle) Layout(gtx C) D {
 											l.MaxLines = 1
 											return l.Layout(gtx)
 										} else if col == 1 {
-											l := material.Body1(r.th, r.seriesHeadings[row%len(r.seriesHeadings)])
+											seriesHeadings := r.results.Results.Series
+											l := material.Body1(r.th, seriesHeadings[row%len(seriesHeadings)])
 											l.MaxLines = 1
 											return l.Layout(gtx)
 										}
@@ -491,7 +490,7 @@ func (b *Benchmark) Layout(gtx C, th *material.Theme, activeDataset backend.Data
 								return b.ws.Bundle.Benchmark.StreamDatasetForBenchmarks(ctx, set...)
 							})
 						}
-						return result(th, b.resultStates[index], res, activeDataset.Headings()).Layout(gtx)
+						return result(th, b.resultStates[index], res).Layout(gtx)
 					})
 				},
 				func(gtx layout.Context) layout.Dimensions {
