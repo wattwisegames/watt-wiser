@@ -497,7 +497,9 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 				if c.isHovered {
 					xR := ceil(c.pos.X)
 					xL := xR - float32(gtx.Dp(1))
-					children := []layout.FlexChild{}
+					children := []layout.FlexChild{layout.Rigid(func(gtx layout.Context) layout.Dimensions { return D{} })}
+					var start, end int64
+					hasTimes := false
 					values := []float64{}
 					for i := range c.Dataset {
 						i := i
@@ -511,6 +513,11 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 							continue
 						}
 						data := c.seriesSlices[i][idx]
+						if !hasTimes {
+							start = data.tsStart
+							end = data.tsEnd
+							hasTimes = true
+						}
 						insertIdx, _ := slices.BinarySearch(values, data.mean)
 						values = slices.Insert(values, insertIdx, data.mean)
 						children = slices.Insert(children, len(children)-insertIdx, layout.Rigid(func(gtx C) D {
@@ -524,6 +531,15 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 								}),
 							)
 						}))
+						if hasTimes {
+							msg := fmt.Sprintf("start: %d\nend: %d", start, end)
+							children[0] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								l := material.Body2(th, msg)
+								l.Alignment = text.End
+								return l.Layout(gtx)
+							})
+							fmt.Println(msg)
+						}
 					}
 					origConstraints := gtx.Constraints
 					gtx.Constraints.Min = image.Point{}
