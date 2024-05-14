@@ -23,10 +23,13 @@ func NewBenchmarkSeriesFrom(series DataSeries, bd BenchmarkData) *BenchmarkSerie
 		wrapped:    series,
 		bd:         bd,
 	}
+	totalBaselineDuration := float64(bd.PreBaselineEnd - bd.PreBaselineStart + bd.PostBaselineEnd - bd.PostBaselineStart)
+	preDuration := float64(bd.PreBaselineEnd - bd.PreBaselineStart)
 	_, preMean, _, _, _ := series.RatesBetween(bd.PreBaselineStart, bd.PreBaselineEnd)
+	postDuration := float64(bd.PostBaselineEnd - bd.PostBaselineStart)
 	_, postMean, _, _, _ := series.RatesBetween(bd.PostBaselineStart, bd.PostBaselineEnd)
 	_, _, _, sum, _ := series.RatesBetween(bd.PreBaselineStart, bd.PostBaselineEnd)
-	b.baselineRate = (preMean + postMean) / 2
+	b.baselineRate = (preMean*preDuration + postMean*postDuration) / totalBaselineDuration
 	b.baselineSum = sum - (float64(b.bd.PostBaselineEnd-b.bd.PreBaselineStart)*b.baselineRate)/1_000_000_000
 	return b
 }
