@@ -538,7 +538,6 @@ func (c *ChartData) layoutPlot(gtx C, th *material.Theme) (dims D, domainMin, do
 								l.Alignment = text.End
 								return l.Layout(gtx)
 							})
-							fmt.Println(msg)
 						}
 					}
 					origConstraints := gtx.Constraints
