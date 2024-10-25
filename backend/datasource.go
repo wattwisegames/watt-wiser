@@ -175,12 +175,25 @@ func (d *Datasource) recordSession(sessionID string, mode Mode, files ...io.Read
 			out <- session
 
 			rawSamples := make(chan InputData, 1024)
+			var wg sync.WaitGroup
 			for _, file := range files {
+				inputSamples := make(chan InputData, 1024)
 				if f, ok := file.(interface{ Name() string }); ok {
 					d.watcher.Add(f.Name())
 				}
-				go d.readSource(file, mode, rawSamples)
+				go d.readSource(file, mode, inputSamples)
+				go func() {
+					defer wg.Done()
+					for sample := range inputSamples {
+						rawSamples <- sample
+					}
+				}()
 			}
+			wg.Add(len(files))
+			go func() {
+				defer close(rawSamples)
+				wg.Wait()
+			}()
 
 			var sessionFile *os.File
 			var sessionWriter *bufio.Writer
