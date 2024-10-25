@@ -795,6 +795,9 @@ func (c *ChartData) layoutStackPlot(gtx C, maxY, pxPerWatt int, rangeMax float64
 			p.Begin(gtx.Ops)
 			// Build the path for the top of the area.
 			for sampleIdx, sample := range c.seriesSlices[i] {
+				if sampleIdx >= len(stackSums) {
+					continue
+				}
 				datum := sample.mean
 				xR := sample.xR
 				xL := sample.xL
